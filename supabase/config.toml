@@ -1,0 +1,10 @@
+project_id = "hjkqnkwjjdvnndnhbprf"
+
+# Telegram can't send a JWT — the webhook authenticates with the
+# X-Telegram-Bot-Api-Secret-Token header instead (see webhook/index.ts).
+[functions.webhook]
+verify_jwt = false
+
+# Only pg_cron (with the Vault-stored bearer token) should reach the checker.
+[functions.checker]
+verify_jwt = true

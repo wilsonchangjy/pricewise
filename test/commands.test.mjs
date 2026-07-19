@@ -32,3 +32,14 @@ test("list/remove/pause/help/unknown", () => {
   assert.equal(parseCommand("/start").cmd, "help");
   assert.equal(parseCommand("hello there").cmd, "unknown");
 });
+
+test("/size takes free text after the item number", () => {
+  assert.deepEqual(parseCommand("/size 2 M"), { cmd: "size", ref: "2", value: "M" });
+  assert.deepEqual(parseCommand("/size 2 Navy / 32inch"), { cmd: "size", ref: "2", value: "Navy / 32inch" });
+  assert.match(parseCommand("/size 2").message, /Usage/);
+});
+
+test("/every parses the interval option", () => {
+  assert.deepEqual(parseCommand("/every 1 12H"), { cmd: "every", ref: "1", value: "12h" });
+  assert.match(parseCommand("/every 1").message, /3h\|6h\|12h\|1d/);
+});

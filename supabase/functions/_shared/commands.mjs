@@ -47,6 +47,20 @@ export function parseCommand(text) {
       if (!ref || !Number.isFinite(price)) return { cmd: "setprice", message: "Usage: /setprice <number> <price>" };
       return { cmd: "setprice", ref, price };
     }
+    case "/size":
+    case "/variant": {
+      // "/size 2 M" or "/size 2 Navy / 32inch" — free text, matched against the
+      // size labels the shop actually returned (see the webhook's matchVariant).
+      const [ref, ...rest2] = rest;
+      const value = rest2.join(" ").trim();
+      if (!ref || !value) return { cmd: "size", message: "Usage: /size <number from /list> <your size>  e.g. /size 2 M" };
+      return { cmd: "size", ref, value };
+    }
+    case "/every": {
+      const [ref, value] = rest;
+      if (!ref || !value) return { cmd: "every", message: "Usage: /every <number from /list> <3h|6h|12h|1d>" };
+      return { cmd: "every", ref, value: value.toLowerCase() };
+    }
     case "/setkey": {
       // Secret — tell the webhook to delete the user's message from the chat.
       if (!arg) return { cmd: "setkey", redactMessage: false, message: "Usage: /setkey <your ScrapingBee key>" };

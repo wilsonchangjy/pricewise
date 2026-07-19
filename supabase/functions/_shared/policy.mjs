@@ -8,9 +8,14 @@
 // planAdd() is pure (inject detectAdapter + the user's context) so it's testable
 // and portable (Node + Deno).
 
-export const MAX_DEFENDED = 5;            // per user, their own key
-export const FREE_INTERVAL_MIN = 180;     // every 3h
-export const DEFENDED_INTERVAL_MIN = 1440; // once a day
+export const MAX_DEFENDED = 5;             // per user, their own key
+export const FREE_INTERVAL_MIN = 360;      // DEFAULT: every 6h
+export const MIN_INTERVAL_MIN = 180;       // FLOOR: never faster than 3h
+export const DEFENDED_INTERVAL_MIN = 1440; // defended: once a day, not negotiable
+
+// What /every accepts. 3h is the floor because a shop that sells out inside
+// three hours is rare, and polling faster mostly buys bans, not saves.
+export const INTERVAL_OPTIONS = { "3h": 180, "6h": 360, "12h": 720, "1d": 1440 };
 
 /**
  * @param {string} url

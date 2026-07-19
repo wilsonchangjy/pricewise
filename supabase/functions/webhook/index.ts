@@ -7,11 +7,12 @@
 // @ts-nocheck  (the _shared modules are plain ESM/JSDoc, shared with the Node tests)
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { parseCommand } from "../_shared/commands.mjs";
-import { planAdd, MAX_DEFENDED } from "../_shared/policy.mjs";
+import { planAdd, MAX_DEFENDED, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, FREE_INTERVAL_MIN, DEFENDED_INTERVAL_MIN } from "../_shared/policy.mjs";
 import { detectAdapter } from "../_shared/router.mjs";
 import { sendMessage, deleteMessage } from "../_shared/telegram.mjs";
 import { labelFromUrl } from "../_shared/label.mjs";
 import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
+import { cleanUrl } from "../_shared/urlguard.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
@@ -31,10 +32,13 @@ const HELP = [
   "Paste a product link to start tracking it.",
   "",
   "/list — your tracked items",
+  "/size <n> <your size> — watch one size instead of the whole product",
+  "/every <n> <3h|6h|12h|1d> — how often to check (default 6h)",
   "/remove <n> — stop tracking one",
   "/setprice <n> <price> — only alert me at/below this",
   "/pause <n> · /resume <n> — mute / unmute",
   "/setkey <key> — your own ScrapingBee key for bot-protected stores",
+  "   (I delete that message from the chat the moment I read it)",
   "/help — this message",
 ].join("\n");
 
@@ -58,6 +62,7 @@ Deno.serve(async (req) => {
   return ok();
 });
 
+const TIP = "\n\nTip: open the product page in your browser, choose the colour/size, then copy the link straight from the address bar.";
 const ok = () => new Response("ok", { status: 200 });
 const reply = (chatId, text) => sendMessage(BOT_TOKEN, chatId, text);
 
@@ -83,6 +88,8 @@ async function handle(msg, chatId, fromId) {
     case "pause":   return mutate(user, chatId, intent.ref, "pause");
     case "resume":  return mutate(user, chatId, intent.ref, "resume");
     case "setprice":return mutate(user, chatId, intent.ref, "setprice", intent.price);
+    case "size":    return setSize(user, chatId, intent.ref, intent.value);
+    case "every":   return setEvery(user, chatId, intent.ref, intent.value);
     case "setkey":  return setKey(user, chatId, intent.key);
     default:        return reply(chatId, intent.message ?? "Unknown command. Try /help.");
   }
@@ -106,7 +113,13 @@ async function upsertUser(telegramUserId, chatId) {
 }
 
 // ── /add ─────────────────────────────────────────────────────────────────────
-async function addItem(user, chatId, url) {
+async function addItem(user, chatId, rawUrl) {
+  // Strangers choose what we fetch, so the link is checked BEFORE any request:
+  // public http(s) only, and campaign junk stripped so shared items dedupe.
+  const clean = cleanUrl(rawUrl);
+  if (!clean.ok) return reply(chatId, `${clean.reason}. Send me a normal product link and I'll take it from there.`);
+  const url = clean.url;
+
   const { data: defendedCount } = await db.rpc("count_defended_subscriptions", { p_user_id: user.id });
   const { data: keyRow } = await db.from("user_api_keys").select("user_id").eq("user_id", user.id).maybeSingle();
 
@@ -124,14 +137,14 @@ async function addItem(user, chatId, url) {
   const res = resolveSelector(url, plan.adapter);
   if (!res.ok) {
     await db.rpc("log_site_request", { p_url: url });
-    return reply(chatId, `I can read ${new URL(url).hostname}, but ${res.reason}. Nothing is being tracked.`);
+    return reply(chatId, `I know ${new URL(url).hostname}, but ${res.reason}.\n\nNothing is being tracked — send another link and I'll try again.` + TIP);
   }
   let selector = res.selector;
   if (res.needsPage) {
     const page = await resolveFromPage(url);
     if (!page.ok) {
       await db.rpc("log_site_request", { p_url: url });
-      return reply(chatId, `I can read ${new URL(url).hostname}, but ${page.reason}. Nothing is being tracked.`);
+      return reply(chatId, `I know ${new URL(url).hostname}, but ${page.reason}.\n\nNothing is being tracked — send another link and I'll try again.` + TIP);
     }
     selector = { ...selector, ...page.patch };
   }
@@ -252,4 +265,88 @@ async function setKey(user, chatId, key) {
     `You can now track bot-protected stores — up to ${MAX_DEFENDED} of them, checked once a day so your credits last.`,
     "Paste one of those links to try it.",
   ].join("\n"));
+}
+
+// ── /size ── pick ONE variant to watch, after the fact ───────────────────────
+// Many shops (COS, Mango, most Shopify stores) don't put the size in the URL at
+// all, so /add can only watch the whole product. This is how you narrow it: we
+// match your words against the size labels the shop itself returned.
+async function setSize(user, chatId, ref, value) {
+  const sub = await subAt(user, chatId, ref);
+  if (!sub) return;
+  const p = sub.tracked_products;
+
+  const { data: rows } = await db
+    .from("product_readings").select("variants")
+    .eq("product_id", p.id).order("checked_at", { ascending: false }).limit(1);
+  const variants = (rows?.[0]?.variants ?? []).filter((v) => v && v.label);
+  if (!variants.length) {
+    return reply(chatId, `I haven't managed to read ${p.title} yet — give it one check cycle, then try /size again.`);
+  }
+
+  const hit = matchVariant(variants, value);
+  if (!hit) {
+    return reply(chatId, [
+      `I couldn't find "${value}" on ${p.title}.`,
+      `What that shop offers: ${variants.map((v) => v.label).join(", ")}`,
+      "Send /size " + ref + " <one of those>.",
+    ].join("\n"));
+  }
+
+  // Clearing the dedup state re-baselines on the chosen size, so the next check
+  // tells you where THAT size stands rather than staying silent.
+  await db.from("subscriptions")
+    .update({ variant_id: String(hit.id), variant_label: hit.label, last_alert_status: null, last_alert_price: null })
+    .eq("id", sub.id);
+  return reply(chatId, `👕 Got it — watching ${hit.label} on ${p.title}.\nI'll re-baseline on the next check and alert on that size only.`);
+}
+
+/** Forgiving match: exact on any field first, then prefix, then substring. */
+function matchVariant(variants, input) {
+  const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const want = norm(input);
+  if (!want) return null;
+  const fields = (v) => [v.label, v.sizeCode, v.id].map(norm).filter(Boolean);
+  return variants.find((v) => fields(v).some((f) => f === want))
+    ?? variants.find((v) => fields(v).some((f) => f.startsWith(want)))
+    ?? variants.find((v) => fields(v).some((f) => f.includes(want)))
+    ?? null;
+}
+
+// ── /every ── how often YOU want this checked ────────────────────────────────
+async function setEvery(user, chatId, ref, value) {
+  const minutes = INTERVAL_OPTIONS[value];
+  if (!minutes) return reply(chatId, `Choose one of: ${Object.keys(INTERVAL_OPTIONS).join(", ")} — e.g. /every ${ref} 6h`);
+
+  const sub = await subAt(user, chatId, ref);
+  if (!sub) return;
+  const p = sub.tracked_products;
+
+  if (p.fetch_strategy === "unblocker" && minutes < DEFENDED_INTERVAL_MIN) {
+    return reply(chatId, "Bot-protected items stay on a once-a-day check — they spend your own ScrapingBee credits, and a faster cadence would burn through them.");
+  }
+
+  await db.from("subscriptions").update({ interval_minutes: minutes }).eq("id", sub.id);
+
+  // The product's clock is the MIN over everyone watching it (floored at 3h).
+  const { data: all } = await db.from("subscriptions")
+    .select("interval_minutes").eq("product_id", p.id).eq("status", "active");
+  const wanted = (all ?? []).map((s) => s.interval_minutes ?? FREE_INTERVAL_MIN);
+  const effective = Math.max(MIN_INTERVAL_MIN, Math.min(...wanted, FREE_INTERVAL_MIN));
+  await db.from("tracked_products")
+    .update({ check_interval_minutes: effective, next_check_at: new Date().toISOString() })
+    .eq("id", p.id);
+
+  return reply(chatId, `⏱️ ${p.title} — checking every ${value} now.`);
+}
+
+/** Shared "which item did you mean?" lookup for the numbered commands. */
+async function subAt(user, chatId, ref) {
+  const subs = await subscriptionList(user.id);
+  const n = Number(ref);
+  if (!Number.isInteger(n) || n < 1 || n > subs.length) {
+    await reply(chatId, `Use the number from /list (1–${subs.length || 0}).`);
+    return null;
+  }
+  return subs[n - 1];
 }
