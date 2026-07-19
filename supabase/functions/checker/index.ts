@@ -96,15 +96,23 @@ async function checkProduct(product) {
     .limit(1);
   const prevReading = prevRows?.[0] ? rowToReading(prevRows[0]) : null;
 
-  await db.from("product_readings").insert({
-    product_id: product.id,
-    price: reading.price ?? null,
-    compare_at_price: reading.compareAtPrice ?? null,
-    currency: reading.currency ?? null,
-    available: reading.available ?? null,
-    variants: reading.variants ?? [],
-    raw_status: reading.available ? "ok" : "oos",
-  });
+  // Only record a reading when something actually CHANGED. Most checks return
+  // an identical answer, and product_readings carries the fat variants blob —
+  // writing one every few hours per item is what fills the database. "When did
+  // we last check?" lives on tracked_products.last_ok_at instead, so nothing is
+  // lost: the newest row is still the last DISTINCT state, which is exactly what
+  // the diff compares against.
+  if (!prevReading || readingChanged(prevReading, reading, prevRows?.[0])) {
+    await db.from("product_readings").insert({
+      product_id: product.id,
+      price: reading.price ?? null,
+      compare_at_price: reading.compareAtPrice ?? null,
+      currency: reading.currency ?? null,
+      available: reading.available ?? null,
+      variants: reading.variants ?? [],
+      raw_status: reading.available ? "ok" : "oos",
+    });
+  }
 
   let alerts = 0;
   for (const sub of subs) {
@@ -172,6 +180,29 @@ async function alertSubscriber(sub, product, prevReading, reading) {
 
   return sent;
 }
+
+/**
+ * Did anything worth storing change? Compares the headline numbers plus the
+ * per-size availability signature — a size selling out matters even when the
+ * price and "is anything in stock" answer both stay put.
+ */
+function readingChanged(prev, next, prevRow) {
+  if (prev.price !== next.price) return true;
+  if (prev.compareAtPrice !== next.compareAtPrice) return true;
+  if (prev.currency !== next.currency) return true;
+  if (prev.available !== next.available) return true;
+  // Old rows may have had their variants compacted away by the retention job;
+  // with nothing to compare, the scalars above are the whole story.
+  const compacted = !prevRow?.variants || (Array.isArray(prevRow.variants) && prevRow.variants.length === 0);
+  if (compacted) return false;
+  return sig(prev.variants) !== sig(next.variants);
+}
+
+const sig = (variants) =>
+  (variants ?? [])
+    .map((v) => `${v.id}:${v.available ? 1 : 0}:${v.price ?? ""}`)
+    .sort()
+    .join("|");
 
 /** product_readings row -> the Reading shape alerting.mjs expects. */
 function rowToReading(row) {
