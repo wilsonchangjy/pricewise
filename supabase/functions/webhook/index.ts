@@ -67,13 +67,29 @@ const ok = () => new Response("ok", { status: 200 });
 const reply = (chatId, text) => sendMessage(BOT_TOKEN, chatId, text);
 
 async function handle(msg, chatId, fromId) {
+  // Groups and channels only cause harm here: chat.id != from.id, so one person's
+  // wishlist (and their /setkey) would spill to everyone in the room. Refuse
+  // before a user row is created, so a group never becomes someone's account.
+  const chatType = msg.chat?.type ?? "private";
+  if (chatType !== "private") {
+    return sendMessage(BOT_TOKEN, chatId, "I only work in a direct message — your list and alerts are private to you. Message me one-to-one and I'll get started.");
+  }
+
   const intent = parseCommand(msg.text);
 
   // A key must never linger in the chat history — scrub it before anything else.
   if (intent.redactMessage) await deleteMessage(BOT_TOKEN, chatId, msg.message_id);
 
   const user = await upsertUser(fromId, chatId);
-  if (!user.is_allowed && !ALLOWED.has(String(fromId))) {
+
+  // ALLOWED_TELEGRAM_IDS is a bootstrap hatch; users.is_allowed is the truth the
+  // CHECKER reads. Promote env-allowed users into the column so the two can never
+  // disagree — otherwise someone allowed only by env gets commands but no alerts.
+  if (!user.is_allowed && ALLOWED.has(String(fromId))) {
+    await db.from("users").update({ is_allowed: true }).eq("id", user.id);
+    user.is_allowed = true;
+  }
+  if (!user.is_allowed) {
     return reply(chatId, `Pricewise is invite-only right now. Your Telegram ID is ${fromId} — ask the owner to add you.`);
   }
 

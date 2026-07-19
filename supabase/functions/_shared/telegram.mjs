@@ -30,3 +30,19 @@ export const sendMessage = (token, chatId, text) =>
 /** Used to scrub /setkey out of the chat history immediately. */
 export const deleteMessage = (token, chatId, messageId) =>
   call(token, "deleteMessage", { chat_id: chatId, message_id: messageId });
+
+/**
+ * Is this chat permanently unreachable (blocked us, deleted their account, gone)?
+ *
+ * This matters because we only advance a subscriber's alert state after a
+ * SUCCESSFUL send — which is right for a transient outage (retry next tick) and
+ * very wrong for someone who blocked the bot, since that retries forever. A
+ * permanent failure has to stop the subscription instead.
+ *
+ * @param {{ok?:boolean, error_code?:number, description?:string}} res
+ */
+export function isUnreachable(res) {
+  if (!res || res.ok) return false;
+  if (res.error_code === 403) return true; // blocked us / deactivated / can't initiate
+  return res.error_code === 400 && /chat not found|user not found/i.test(res.description ?? "");
+}

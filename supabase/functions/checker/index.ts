@@ -9,7 +9,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { selectAdapter } from "../_shared/adapters/index.mjs";
 import { evaluate } from "../_shared/alerting.mjs";
-import { sendMessage } from "../_shared/telegram.mjs";
+import { sendMessage, isUnreachable } from "../_shared/telegram.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const BATCH_SIZE = Number(Deno.env.get("CHECK_BATCH_SIZE") ?? 20);
@@ -49,14 +49,18 @@ const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 async function checkProduct(product) {
-  const { data: subs } = await db
+  const { data: rows } = await db
     .from("subscriptions")
-    .select("*, users(telegram_chat_id)")
+    .select("*, users(telegram_chat_id, is_allowed)")
     .eq("product_id", product.id)
     .eq("status", "active");
 
-  // Nobody is listening (all paused/removed) — don't spend a fetch on it.
-  if (!subs?.length) {
+  // Revoking access (is_allowed=false) has to STOP the work, not just block new
+  // commands — otherwise a banned user's list keeps costing fetches and alerts.
+  const subs = (rows ?? []).filter((s) => s.users?.is_allowed);
+
+  // Nobody is listening (all paused/removed/revoked) — don't spend a fetch on it.
+  if (!subs.length) {
     await db.from("tracked_products")
       .update({ next_check_at: minutesFromNow(24 * 60) })
       .eq("id", product.id);
@@ -145,7 +149,14 @@ async function alertSubscriber(sub, product, prevReading, reading) {
   for (const ev of events) {
     if (ev.kind !== "baseline" && wanted[ev.kind] === false) continue;
     const res = await sendMessage(BOT_TOKEN, sub.users.telegram_chat_id, ev.text);
-    if (!res?.ok) { delivered = false; continue; } // retry on the next tick
+    if (isUnreachable(res)) {
+      // They blocked the bot or the chat is gone. Retrying is pointless and, with
+      // delivery-gated state, endless — so park the subscription. /resume revives it.
+      console.warn(`subscription ${sub.id}: chat unreachable (${res.description ?? res.error_code}) — pausing`);
+      await db.from("subscriptions").update({ status: "paused" }).eq("id", sub.id);
+      return sent;
+    }
+    if (!res?.ok) { delivered = false; continue; } // transient — retry on the next tick
     await db.from("alerts").insert({ subscription_id: sub.id, kind: ev.kind, payload: { text: ev.text } });
     sent++;
   }
