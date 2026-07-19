@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planAdd, MAX_DEFENDED, FREE_INTERVAL_MIN, DEFENDED_INTERVAL_MIN } from "../src/policy.mjs";
+import { planAdd, MAX_DEFENDED, FREE_INTERVAL_MIN, DEFENDED_INTERVAL_MIN } from "../supabase/functions/_shared/policy.mjs";
 
 const detect = (adapter, strategy) => async () => ({ adapter, strategy });
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCommand } from "../src/commands.mjs";
+import { parseCommand } from "../supabase/functions/_shared/commands.mjs";
 
 test("a bare shared URL is shorthand for /add", () => {
   const r = parseCommand("https://anane.co/products/x?variant=1");

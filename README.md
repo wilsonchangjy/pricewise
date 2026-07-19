@@ -62,8 +62,9 @@ webhook at it.
 ## Contributing
 
 New store adapters are very welcome — each is a small, self-contained module that
-turns a product URL into `{ price, per-size availability }`. See `src/` for
-examples. Bug reports and store requests (the bot logs unsupported sites) help
+turns a product URL into `{ price, per-size availability }`. See
+`supabase/functions/_shared/adapters/` for examples, and `test/` for how they're
+verified. Bug reports and store requests (the bot logs unsupported sites) help
 prioritise what to add next.
 
 ## License

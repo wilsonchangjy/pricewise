@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectAdapter, strategyFor } from "../src/router.mjs";
+import { detectAdapter, strategyFor } from "../supabase/functions/_shared/router.mjs";
 
 // Network-free: inject a fake fetch so tests are deterministic in CI.
 const fakeFetch = (shopifyHosts = []) => async (url) => {
