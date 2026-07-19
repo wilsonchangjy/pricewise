@@ -10,7 +10,10 @@
 //   cos     /en-sg/.../product/seersucker-resort-shirt-black-1326785001
 //   bershka /sg/volcom-skater-bermuda-shorts-c0p235801198.html
 //
-// resolveSelector() is PURE (no network) so it is fully unit-tested.
+// resolveSelector() is PURE (no network) so it is fully unit-tested. The two
+// network helpers below go through safeFetch, so they inherit the redirect guard.
+
+import { safeFetch } from "./fetcher.mjs";
 
 // Inditex store/catalog ids are per-market constants, not per-product. Only
 // markets we've actually verified are listed; an unknown market is refused
@@ -115,7 +118,7 @@ export function resolveSelector(url, adapter) {
  * @param {string} url
  * @param {{ fetchImpl?: typeof fetch }} [opts]
  */
-export async function resolveFromPage(url, { fetchImpl = fetch } = {}) {
+export async function resolveFromPage(url, { fetchImpl = safeFetch } = {}) {
   try {
     const r = await fetchImpl(url, { headers: { accept: "text/html", "user-agent": UA } });
     if (!r.ok) return { ok: false, reason: `couldn't open the product page (HTTP ${r.status})` };
@@ -136,7 +139,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
  * Best-effort product title from the page (og:title / <title>). One fetch at
  * /add time only — never on the check path. Falls back to the URL slug.
  */
-export async function fetchTitle(url, { fetchImpl = fetch } = {}) {
+export async function fetchTitle(url, { fetchImpl = safeFetch } = {}) {
   try {
     const r = await fetchImpl(url, { headers: { accept: "text/html", "user-agent": UA } });
     if (!r.ok) return null;

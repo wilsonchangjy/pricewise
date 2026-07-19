@@ -8,6 +8,7 @@
 // planAdd() is pure (inject detectAdapter + the user's context) so it's testable
 // and portable (Node + Deno).
 
+export const MAX_ITEMS = 20;               // per user, total list size
 export const MAX_DEFENDED = 5;             // per user, their own key
 export const FREE_INTERVAL_MIN = 360;      // DEFAULT: every 6h
 export const MIN_INTERVAL_MIN = 180;       // FLOOR: never faster than 3h

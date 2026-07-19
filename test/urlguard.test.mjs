@@ -67,3 +67,46 @@ test("cleanUrl guards first, then normalises", () => {
   assert.equal(cleanUrl("http://127.0.0.1/p").ok, false);
   assert.equal(cleanUrl("https://brand.com/p?utm_source=x").url, "https://brand.com/p");
 });
+
+// ── redirect hops ────────────────────────────────────────────────────────────
+import { safeFetch } from "../supabase/functions/_shared/fetcher.mjs";
+
+const hop = (status, location) => ({
+  status,
+  ok: false,
+  headers: { get: (k) => (k.toLowerCase() === "location" ? location : null) },
+});
+const page = () => ({ status: 200, ok: true, headers: { get: () => null }, text: async () => "<html>hi</html>" });
+
+test("a redirect to cloud metadata is blocked, not followed", async () => {
+  const fetchImpl = async (u) => (u.includes("brand.com") ? hop(302, "http://169.254.169.254/latest/meta-data/") : page());
+  await assert.rejects(
+    () => safeFetch("https://brand.com/p", {}, { fetchImpl }),
+    /blocked redirect target/,
+  );
+});
+
+test("a redirect to a private IP is blocked even after several public hops", async () => {
+  const chain = {
+    "https://a.test/1": hop(301, "https://b.test/2"),
+    "https://b.test/2": hop(302, "https://c.test/3"),
+    "https://c.test/3": hop(307, "http://10.0.0.7/admin"),
+  };
+  const fetchImpl = async (u) => chain[u] ?? page();
+  await assert.rejects(() => safeFetch("https://a.test/1", {}, { fetchImpl }), /blocked redirect target/);
+});
+
+test("ordinary redirects still resolve, and relative Locations work", async () => {
+  const chain = {
+    "https://shop.test/p": hop(301, "/en/p"),
+    "https://shop.test/en/p": page(),
+  };
+  const fetchImpl = async (u) => chain[u] ?? page();
+  const res = await safeFetch("https://shop.test/p", {}, { fetchImpl });
+  assert.equal(res.status, 200);
+});
+
+test("a redirect loop gives up instead of hanging", async () => {
+  const fetchImpl = async () => hop(302, "https://loop.test/again");
+  await assert.rejects(() => safeFetch("https://loop.test/a", {}, { fetchImpl }), /too many redirects/);
+});

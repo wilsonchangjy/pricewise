@@ -7,7 +7,7 @@
 // @ts-nocheck  (the _shared modules are plain ESM/JSDoc, shared with the Node tests)
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { parseCommand } from "../_shared/commands.mjs";
-import { planAdd, MAX_DEFENDED, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, FREE_INTERVAL_MIN, DEFENDED_INTERVAL_MIN } from "../_shared/policy.mjs";
+import { planAdd, MAX_DEFENDED, MAX_ITEMS, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, FREE_INTERVAL_MIN, DEFENDED_INTERVAL_MIN } from "../_shared/policy.mjs";
 import { detectAdapter } from "../_shared/router.mjs";
 import { sendMessage, deleteMessage } from "../_shared/telegram.mjs";
 import { labelFromUrl } from "../_shared/label.mjs";
@@ -119,6 +119,14 @@ async function addItem(user, chatId, rawUrl) {
   const clean = cleanUrl(rawUrl);
   if (!clean.ok) return reply(chatId, `${clean.reason}. Send me a normal product link and I'll take it from there.`);
   const url = clean.url;
+
+  // One person shouldn't be able to eat the whole check budget. Counts the WHOLE
+  // list (paused included) so "how many can I have?" has one predictable answer.
+  const { count: listSize } = await db.from("subscriptions")
+    .select("id", { count: "exact", head: true }).eq("user_id", user.id);
+  if ((listSize ?? 0) >= MAX_ITEMS) {
+    return reply(chatId, `Your list is full at ${MAX_ITEMS} items — /remove one to make room. (/list shows them, oldest first.)`);
+  }
 
   const { data: defendedCount } = await db.rpc("count_defended_subscriptions", { p_user_id: user.id });
   const { data: keyRow } = await db.from("user_api_keys").select("user_id").eq("user_id", user.id).maybeSingle();
