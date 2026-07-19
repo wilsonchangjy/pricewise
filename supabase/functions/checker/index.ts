@@ -14,6 +14,7 @@ import { sendMessage } from "../_shared/telegram.mjs";
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const BATCH_SIZE = Number(Deno.env.get("CHECK_BATCH_SIZE") ?? 20);
 const MAX_FAILURES = 10; // then the product is parked as dead
+const NOTIFY_AFTER = 3;  // ...and we warn the watchers at this point
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL"),
@@ -68,11 +69,17 @@ async function checkProduct(product) {
     unblockerKey = data ?? undefined;
   }
 
-  const item = { id: String(product.id), label: product.title, url: product.url, adapter: product.adapter };
+  const item = {
+    id: String(product.id),
+    label: product.title,
+    url: product.url,
+    adapter: product.adapter,
+    variantSelector: product.variant_selector ?? {},
+  };
   const reading = await selectAdapter(product.adapter)(item, { unblockerKey });
 
   if (!reading.ok) {
-    await recordFailure(product, reading.message, reading.kind);
+    await recordFailure(product, reading.message, reading.kind, subs);
     return { ok: false, alerts: 0 };
   }
 
@@ -134,12 +141,18 @@ async function alertSubscriber(sub, product, prevReading, reading) {
 
   const wanted = sub.alert_on ?? {};
   let sent = 0;
+  let delivered = true;
   for (const ev of events) {
     if (ev.kind !== "baseline" && wanted[ev.kind] === false) continue;
-    await sendMessage(BOT_TOKEN, sub.users.telegram_chat_id, ev.text);
+    const res = await sendMessage(BOT_TOKEN, sub.users.telegram_chat_id, ev.text);
+    if (!res?.ok) { delivered = false; continue; } // retry on the next tick
     await db.from("alerts").insert({ subscription_id: sub.id, kind: ev.kind, payload: { text: ev.text } });
     sent++;
   }
+
+  // Advancing the dedup state on an UNDELIVERED alert loses it forever: the next
+  // check sees no transition and stays quiet. So only move it once Telegram took it.
+  if (!delivered) return sent;
 
   const update = {};
   if ("lastAlertPrice" in patch) update.last_alert_price = patch.lastAlertPrice ?? null;
@@ -163,10 +176,22 @@ function rowToReading(row) {
 }
 
 /** Exponential back-off; a persistently broken URL is parked, not retried forever. */
-async function recordFailure(product, message, kind = "error") {
+async function recordFailure(product, message, kind = "error", subs = null) {
   const failures = (product.consecutive_failures ?? 0) + 1;
   const backoff = product.check_interval_minutes * Math.min(2 ** failures, 8);
   console.warn(`product ${product.id} (${product.adapter}) failed x${failures}: ${message}`);
+
+  // Silence is the one thing a watcher must never do. Speak up once when we start
+  // backing off, and once more when we give up — the equality checks keep it to
+  // exactly two messages per broken item.
+  if (failures === NOTIFY_AFTER || failures === MAX_FAILURES) {
+    const watchers = subs ?? (await db.from("subscriptions")
+      .select("*, users(telegram_chat_id)").eq("product_id", product.id).eq("status", "active")).data ?? [];
+    const text = failures >= MAX_FAILURES
+      ? `❌ I've given up on ${product.title}\nIt failed ${failures} checks in a row (${message}).\nIt's off your check list — send the link again if you think it's fixed.\n${product.url}`
+      : `⚠️ I'm having trouble reading ${product.title}\n${message}\nI'll keep trying, less often. If it never recovers I'll tell you.\n${product.url}`;
+    for (const w of watchers) await sendMessage(BOT_TOKEN, w.users.telegram_chat_id, text);
+  }
 
   await db.from("product_readings").insert({
     product_id: product.id,

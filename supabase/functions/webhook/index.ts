@@ -11,6 +11,7 @@ import { planAdd, MAX_DEFENDED } from "../_shared/policy.mjs";
 import { detectAdapter } from "../_shared/router.mjs";
 import { sendMessage, deleteMessage } from "../_shared/telegram.mjs";
 import { labelFromUrl } from "../_shared/label.mjs";
+import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
@@ -118,6 +119,23 @@ async function addItem(user, chatId, url) {
   if (plan.logRequest) await db.rpc("log_site_request", { p_url: url });
   if (plan.action !== "track") return reply(chatId, plan.message);
 
+  // Resolve the ids this adapter needs FROM THE URL. If we can't, say so now —
+  // "Tracking this!" followed by permanent silence is the worst outcome.
+  const res = resolveSelector(url, plan.adapter);
+  if (!res.ok) {
+    await db.rpc("log_site_request", { p_url: url });
+    return reply(chatId, `I can read ${new URL(url).hostname}, but ${res.reason}. Nothing is being tracked.`);
+  }
+  let selector = res.selector;
+  if (res.needsPage) {
+    const page = await resolveFromPage(url);
+    if (!page.ok) {
+      await db.rpc("log_site_request", { p_url: url });
+      return reply(chatId, `I can read ${new URL(url).hostname}, but ${page.reason}. Nothing is being tracked.`);
+    }
+    selector = { ...selector, ...page.patch };
+  }
+
   // One row per URL: N subscribers => 1 fetch.
   let { data: product } = await db.from("tracked_products").select("*").eq("url", url).maybeSingle();
   if (!product) {
@@ -127,7 +145,8 @@ async function addItem(user, chatId, url) {
         url,
         adapter: plan.adapter,
         fetch_strategy: plan.strategy,
-        title: labelFromUrl(url),
+        title: (await fetchTitle(url)) ?? labelFromUrl(url),
+        variant_selector: selector,
         check_interval_minutes: plan.intervalMinutes,
         next_check_at: new Date().toISOString(),
       })
@@ -149,7 +168,12 @@ async function addItem(user, chatId, url) {
   const { error } = await db.from("subscriptions").insert({ user_id: user.id, product_id: product.id });
   if (error) throw error;
 
-  return reply(chatId, `👀 ${plan.message}\n${product.title}\nI'll send a baseline reading shortly, then only when something changes.`);
+  return reply(chatId, [
+    `👀 ${plan.message}`,
+    product.title,
+    `Watching: ${res.watching}.`,
+    "I'll send a baseline reading shortly, then only when something changes.",
+  ].join("\n"));
 }
 
 // ── /list (the numbering every other command refers to) ──────────────────────
