@@ -12,11 +12,14 @@ import { evaluate } from "../_shared/alerting.mjs";
 import { sendMessage, isUnreachable } from "../_shared/telegram.mjs";
 import { contextLine } from "../_shared/history.mjs";
 import { matchVariant } from "../_shared/variants.mjs";
+import { verifyPrice } from "../_shared/verify.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const BATCH_SIZE = Number(Deno.env.get("CHECK_BATCH_SIZE") ?? 20);
 const MAX_FAILURES = 10; // then the product is parked as dead
 const NOTIFY_AFTER = 3;  // ...and we warn the watchers at this point
+const VERIFY_SAMPLE_DAYS = 7;   // sanity-check even when nothing looks wrong
+const VERIFY_DEFENDED_MIN_H = 24; // defended checks spend the USER's credits
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL"),
@@ -112,13 +115,22 @@ async function checkProduct(product) {
       currency: reading.currency ?? null,
       available: reading.available ?? null,
       variants: reading.variants ?? [],
-      raw_status: reading.available ? "ok" : "oos",
+      raw_status: reading.available ? "ok" : "oos", // may be rewritten to 'soft' below
     });
   }
 
+  // Verify BEFORE we make a price claim. Cost lands on alerts, not on checks:
+  // a price that hasn't moved needs no second opinion, and a wrong number only
+  // does damage at the moment we tell someone to act on it.
+  const priceMoved = prevReading
+    && typeof reading.price === "number" && typeof prevReading.price === "number"
+    && reading.price !== prevReading.price;
+  const verdict = await maybeVerify(product, reading, priceMoved);
+  const priceTrusted = verdict?.status !== "disagree";
+
   let alerts = 0;
   for (const sub of subs) {
-    alerts += await alertSubscriber(sub, product, prevReading, reading);
+    alerts += await alertSubscriber(sub, product, prevReading, reading, priceTrusted);
   }
 
   await db.from("tracked_products").update({
@@ -131,7 +143,7 @@ async function checkProduct(product) {
   return { ok: true, alerts };
 }
 
-async function alertSubscriber(sub, product, prevReading, reading) {
+async function alertSubscriber(sub, product, prevReading, reading, priceTrusted = true) {
   // A saved default size ("shoes: UK9") parked at /add — now we finally know what
   // this shop calls its sizes, so resolve it against the REAL labels. A default
   // that doesn't match is dropped, never approximated: watching the wrong size is
@@ -171,7 +183,15 @@ async function alertSubscriber(sub, product, prevReading, reading) {
       }
     : null;
 
-  const { events, patch } = evaluate(item, prev, reading);
+  let { events, patch } = evaluate(item, prev, reading);
+
+  // A disputed price must not become a "PRICE DROP" someone spends money on.
+  // Stock events survive: availability comes from a different data path, and
+  // "your size is back" is still true whatever the price disagreement.
+  if (!priceTrusted) {
+    events = events.filter((e) => e.kind !== "price_drop" && e.kind !== "target_hit" && e.kind !== "price_up");
+    delete patch.lastAlertPrice; // don't bank a number we don't believe
+  }
 
   // A drop alert asks a silent question: "is this actually a good price?" We can
   // answer it from our own observations — carefully, since our history starts the
@@ -252,6 +272,42 @@ const sig = (variants) =>
     .map((v) => `${v.id}:${v.available ? 1 : 0}:${v.price ?? ""}`)
     .sort()
     .join("|");
+
+/**
+ * Decide whether this reading earns a second opinion, and record the outcome.
+ * Verify when the price MOVED (a claim is imminent) or when the weekly sample is
+ * due (an adapter can be quietly wrong for weeks without crossing a threshold).
+ */
+async function maybeVerify(product, reading, priceMoved) {
+  const lastAt = product.last_verified_at ? new Date(product.last_verified_at).getTime() : 0;
+  const ageH = (Date.now() - lastAt) / 3_600_000;
+
+  // Defended products cost the user's own unblocker credits, so they're verified
+  // at most daily and never merely for the sample.
+  const defended = product.fetch_strategy === "unblocker";
+  const sampleDue = !defended && ageH >= VERIFY_SAMPLE_DAYS * 24;
+  if (defended && (!priceMoved || ageH < VERIFY_DEFENDED_MIN_H)) return null;
+  if (!priceMoved && !sampleDue) return null;
+
+  const verdict = await verifyPrice(product, reading);
+
+  // "unknown" is not evidence of anything — don't let an unreachable second
+  // source mark a good adapter as broken, and don't reset the sample clock.
+  if (verdict.status === "unknown") {
+    console.warn(`verify ${product.id}: unknown (${verdict.reason})`);
+    return verdict;
+  }
+
+  await db.from("tracked_products").update({
+    last_verified_at: new Date().toISOString(),
+    verify_note: verdict.status === "disagree" ? verdict.reason : null,
+  }).eq("id", product.id);
+
+  if (verdict.status === "disagree") {
+    console.error(`verify ${product.id} DISAGREE: ${verdict.reason} — withholding price claims`);
+  }
+  return verdict;
+}
 
 /** product_readings row -> the Reading shape alerting.mjs expects. */
 function rowToReading(row) {
