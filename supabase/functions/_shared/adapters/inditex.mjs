@@ -142,10 +142,13 @@ function findSizesArray(node) {
  */
 export async function readInditex(item, ctx = {}) {
   const checkedAt = new Date().toISOString();
-  const res = await fetchMaybeUnblocked(item, { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider, country: "sg", validate: (html) => html.includes("visibilityValue") });
+  const res = await fetchMaybeUnblocked(item, { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider,
+    startTier: ctx.startTier, country: "sg", validate: (html) => html.includes("visibilityValue") });
   if (!res.ok) {
     const kind = res.status === 403 ? "blocked" : res.error === "timeout" ? "timeout" : "http";
     return { ok: false, kind, status: res.status, message: `inditex: ${res.message}`, checkedAt };
   }
-  return parseInditex(res.html, item);
+  const out = parseInditex(res.html, item);
+  if (out.ok) out.tier = res.tier;
+  return out;
 }

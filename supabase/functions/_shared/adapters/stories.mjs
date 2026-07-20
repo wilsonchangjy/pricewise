@@ -57,6 +57,7 @@ export async function readStories(item, ctx = {}) {
   const res = await fetchMaybeUnblocked(item, {
     apiKey: ctx.unblockerKey,
     provider: ctx.unblockerProvider,
+    startTier: ctx.startTier,
     country: "sg",
     validate: (html) => /"sizes"\s*:\s*\[[^\]]*"sku"/.test(html),
   });
@@ -64,5 +65,7 @@ export async function readStories(item, ctx = {}) {
     const kind = res.status === 403 ? "blocked" : res.error === "timeout" ? "timeout" : "http";
     return { ok: false, kind, status: res.status, message: `stories: ${res.message}`, checkedAt };
   }
-  return parseStories(res.html, item);
+  const out = parseStories(res.html, item);
+  if (out.ok) out.tier = res.tier;
+  return out;
 }

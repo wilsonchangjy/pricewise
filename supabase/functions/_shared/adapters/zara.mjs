@@ -13,10 +13,13 @@ import { parseJsonLd } from "./jsonld.mjs";
 /** @param {import("../types.mjs").Item} item */
 export async function readZara(item, ctx = {}) {
   const checkedAt = new Date().toISOString();
-  const res = await fetchMaybeUnblocked(item, { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider, country: "sg", validate: (html) => html.includes("application/ld+json") });
+  const res = await fetchMaybeUnblocked(item, { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider,
+    startTier: ctx.startTier, country: "sg", validate: (html) => html.includes("application/ld+json") });
   if (!res.ok) {
     const kind = res.status === 403 ? "blocked" : res.error === "timeout" ? "timeout" : "http";
     return { ok: false, kind, status: res.status, message: `zara: ${res.message}`, checkedAt };
   }
-  return parseJsonLd(res.html, item);
+  const out = parseJsonLd(res.html, item);
+  if (out.ok) out.tier = res.tier;
+  return out;
 }

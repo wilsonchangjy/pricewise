@@ -20,6 +20,7 @@ const MAX_FAILURES = 10; // then the product is parked as dead
 const NOTIFY_AFTER = 3;  // ...and we warn the watchers at this point
 const VERIFY_SAMPLE_DAYS = 7;   // sanity-check even when nothing looks wrong
 const VERIFY_DEFENDED_MIN_H = 24; // defended checks spend the USER's credits
+const TIER_MEMORY_DAYS = 7;       // then re-probe from plain in case a site relaxed
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL"),
@@ -87,7 +88,16 @@ async function checkProduct(product) {
     adapter: product.adapter,
     variantSelector: product.variant_selector ?? {},
   };
-  const reading = await selectAdapter(product.adapter)(item, { unblockerKey, unblockerProvider });
+
+  // Start at the tier we know works for this site, so we stop paying to
+  // rediscover it. Forget weekly: a site that relaxes should get cheap again
+  // rather than being billed at yesterday's difficulty forever.
+  const tierAge = product.unblocker_tier_at
+    ? (Date.now() - new Date(product.unblocker_tier_at).getTime()) / 86_400_000
+    : Infinity;
+  const startTier = tierAge < TIER_MEMORY_DAYS ? (product.unblocker_tier ?? undefined) : undefined;
+
+  const reading = await selectAdapter(product.adapter)(item, { unblockerKey, unblockerProvider, startTier });
 
   if (!reading.ok) {
     await recordFailure(product, reading.message, reading.kind, subs);
@@ -140,6 +150,11 @@ async function checkProduct(product) {
     consecutive_failures: 0,
     status: "active",
     next_check_at: minutesFromNow(product.check_interval_minutes),
+    ...(reading.tier && reading.tier !== product.unblocker_tier
+      ? { unblocker_tier: reading.tier, unblocker_tier_at: new Date().toISOString() }
+      : reading.tier
+      ? { unblocker_tier_at: new Date().toISOString() }
+      : {}),
   }).eq("id", product.id);
 
   return { ok: true, alerts };
@@ -347,6 +362,7 @@ async function recordFailure(product, message, kind = "error", subs = null) {
     raw_status: kind === "blocked" ? "blocked" : kind === "soft" ? "soft" : "error",
   });
   await db.from("tracked_products").update({
+    unblocker_tier: null, // it stopped working; re-explore from plain next time
     consecutive_failures: failures,
     status: failures >= MAX_FAILURES ? "dead" : failures >= 3 ? "backing_off" : "active",
     next_check_at: minutesFromNow(backoff),

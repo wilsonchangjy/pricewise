@@ -84,3 +84,34 @@ test("an 80-char ScrapingBee key still detects unambiguously", () => {
   const key = "9XZQK2WMTV8RJHYP4NBLDCF6SGA3EU7I5OQZXKMWTVJRHYPNBLDCF6SGA3EU7I5OQZXKMWTVJR";
   assert.equal(detectProvider(key), "scrapingbee");
 });
+
+// ── tier memory ─────────────────────────────────────────────────────────────
+import { fetchViaUnblockerTiered } from "../supabase/functions/_shared/unblocker.mjs";
+
+const fakeProvider = (calls) => async (url) => {
+  calls.push(new URL(url).searchParams.get("super") ? "super"
+    : new URL(url).searchParams.get("render") ? "render" : "plain");
+  return { ok: true, status: 200, headers: { get: () => null }, text: async () => "<html>real product data</html>" };
+};
+
+test("with no memory, the ladder starts at plain", async () => {
+  const calls = [];
+  globalThis.fetch = fakeProvider(calls);
+  await fetchViaUnblockerTiered("https://x.test/p", { apiKey: "K", provider: "scrapedo" });
+  assert.equal(calls[0], "plain");
+});
+
+test("a remembered tier skips the tiers already known to be too weak", async () => {
+  const calls = [];
+  globalThis.fetch = fakeProvider(calls);
+  await fetchViaUnblockerTiered("https://x.test/p", { apiKey: "K", provider: "scrapedo", startTier: "super" });
+  assert.equal(calls.length, 1, "should not pay for plain and render first");
+  assert.equal(calls[0], "super");
+});
+
+test("an unknown remembered tier falls back to the full ladder", async () => {
+  const calls = [];
+  globalThis.fetch = fakeProvider(calls);
+  await fetchViaUnblockerTiered("https://x.test/p", { apiKey: "K", provider: "scrapedo", startTier: "nonsense" });
+  assert.equal(calls[0], "plain");
+});

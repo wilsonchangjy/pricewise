@@ -29,12 +29,20 @@ const looksBlocked = (status, body) =>
  * @param {string} url
  * @param {{ apiKey?: string, provider?: string, country?: string, maxTier?: string }} opts
  */
-export async function fetchViaUnblockerTiered(url, { apiKey, provider = DEFAULT_PROVIDER, country = "sg", maxTier, validate } = {}) {
+export async function fetchViaUnblockerTiered(url, { apiKey, provider = DEFAULT_PROVIDER, country = "sg", maxTier, validate, startTier } = {}) {
   if (!apiKey) return { ok: false, status: 0, body: "", mode: "none", ms: 0, error: "no unblocker key" };
   const p = PROVIDERS[provider];
   if (!p) return { ok: false, status: 0, body: "", mode: "none", ms: 0, error: `unknown provider ${provider}` };
 
-  const ladder = maxTier ? p.tiers.slice(0, p.tiers.findIndex((t) => t.mode === maxTier) + 1) : p.tiers;
+  let ladder = maxTier ? p.tiers.slice(0, p.tiers.findIndex((t) => t.mode === maxTier) + 1) : p.tiers;
+
+  // Skip tiers we already know are too weak for this site. The caller decides
+  // when to forget (weekly), so a site that relaxes its defences gets cheap again
+  // rather than paying yesterday's price forever.
+  if (startTier) {
+    const from = ladder.findIndex((t) => t.mode === startTier);
+    if (from > 0) ladder = ladder.slice(from);
+  }
 
   let last = { ok: false, status: 0, body: "", mode: "none", ms: 0, error: "no tiers tried" };
   for (const tier of ladder) {
@@ -62,8 +70,10 @@ export async function fetchApiViaUnblocker(url, { apiKey, provider = DEFAULT_PRO
   // Start plain: measured 2026-07-21, Bershka/Stradivarius/ASOS all answer a
   // 1-credit plain request. Only pay for proxies when plain actually fails.
   let last;
-  for (const tier of p.apiTiers ?? [{}]) {
+  const ladder = p.apiTiers ?? [{}];
+  for (const [i, tier] of ladder.entries()) {
     last = await providerFetch(provider, url, apiKey, country, tier);
+    last.tier = i === 0 ? "plain" : "premium";
     if (last.ok && !looksBlocked(last.status, last.body)) return last;
   }
   return last;
@@ -75,7 +85,7 @@ export async function fetchApiViaUnblocker(url, { apiKey, provider = DEFAULT_PRO
  * @param {import("./types.mjs").Item} item
  * @param {{ apiKey?: string, provider?: string, country?: string, validate?: (html:string)=>boolean }} opts
  */
-export async function fetchMaybeUnblocked(item, { apiKey, provider = DEFAULT_PROVIDER, country = "sg", validate } = {}) {
+export async function fetchMaybeUnblocked(item, { apiKey, provider = DEFAULT_PROVIDER, country = "sg", validate, startTier } = {}) {
   const direct = await httpGet(item.url, { headers: { accept: "text/html" } });
   const clean = direct.ok && !/captcha|are you human|access denied/i.test(direct.body);
   if (clean && (!validate || validate(direct.body))) {
@@ -87,14 +97,14 @@ export async function fetchMaybeUnblocked(item, { apiKey, provider = DEFAULT_PRO
       message: `direct unusable (${direct.status || direct.error}${clean ? "; shell/needs render" : ""}) and no unblocker key on this subscription`,
     };
   }
-  const un = await fetchViaUnblockerTiered(item.url, { apiKey, provider, country, validate });
+  const un = await fetchViaUnblockerTiered(item.url, { apiKey, provider, country, validate, startTier });
   if (!un.ok) {
     return {
       ok: false, via: `${provider}:${un.mode}`, status: un.status, error: un.error,
       message: `unblocker failed (${un.status || un.error}) at mode=${un.mode}`,
     };
   }
-  return { ok: true, html: un.body, via: `${provider}:${un.mode}`, status: un.status };
+  return { ok: true, html: un.body, via: `${provider}:${un.mode}`, tier: un.mode, status: un.status };
 }
 
 async function providerFetch(provider, url, apiKey, country, tierParams) {
