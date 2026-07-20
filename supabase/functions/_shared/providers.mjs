@@ -41,7 +41,9 @@ export const PROVIDERS = {
   scraperapi: {
     label: "ScraperAPI",
     signup: "https://www.scraperapi.com",
-    freeNote: "1,000 credits every month — renews",
+    // Corrected 2026-07-21: their free credits are a TRIAL, not a monthly tier.
+    // I had taken a search-result snippet at face value instead of the pricing page.
+    freeNote: "trial credits only — does not renew",
     verified: false,
     base: "https://api.scraperapi.com/",
     keyParam: "api_key",
@@ -59,7 +61,7 @@ export const PROVIDERS = {
   scrapedo: {
     label: "Scrape.do",
     signup: "https://scrape.do",
-    freeNote: "1,000 requests every month — renews",
+    freeNote: "1,000 credits every month — renews (confirmed on their pricing page)",
     verified: false,
     base: "https://api.scrape.do/",
     keyParam: "token",

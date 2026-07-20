@@ -404,7 +404,10 @@ async function setKey(user, chatId, key, providerWord) {
 }
 
 async function showProviders(chatId) {
-  const lines = providerSummary().map((p) =>
+  // Renewing tiers first — that property matters more than the headline number.
+  const lines = providerSummary()
+    .sort((a, b) => Number(b.freeNote.includes("renews")) - Number(a.freeNote.includes("renews")))
+    .map((p) =>
     `• ${p.label}${p.verified ? "" : " (untested by me)"}\n  ${p.freeNote}\n  ${p.signup}`);
   return sendMessage(BOT_TOKEN, chatId, [
     "🔑 Bot-protected shops (Zara, Massimo Dutti, ASOS…) need an unblocker service.",
