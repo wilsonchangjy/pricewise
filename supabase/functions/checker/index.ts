@@ -170,7 +170,7 @@ async function alertSubscriber(sub, product, prevReading, reading) {
   let delivered = true;
   for (const ev of events) {
     if (ev.kind !== "baseline" && wanted[ev.kind] === false) continue;
-    const res = await sendMessage(BOT_TOKEN, sub.users.telegram_chat_id, ev.text);
+    const res = await sendMessage(BOT_TOKEN, sub.users.telegram_chat_id, ev.text, { preview: true });
     if (isUnreachable(res)) {
       // They blocked the bot or the chat is gone. Retrying is pointless and, with
       // delivery-gated state, endless — so park the subscription. /resume revives it.

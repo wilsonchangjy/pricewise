@@ -20,11 +20,17 @@ async function call(token, method, body) {
   }
 }
 
-export const sendMessage = (token, chatId, text) =>
+/**
+ * @param {object} [opts] `preview: true` lets Telegram render its own link card
+ *   from the product URL — image, title, description, for free. That's why alerts
+ *   don't need us to attach product photos ourselves. Kept OFF for /list and
+ *   /help, where a card per line would bury the text.
+ */
+export const sendMessage = (token, chatId, text, opts = {}) =>
   call(token, "sendMessage", {
     chat_id: chatId,
     text: String(text).slice(0, 4000),
-    disable_web_page_preview: true,
+    disable_web_page_preview: !opts.preview,
   });
 
 /** Used to scrub /setkey out of the chat history immediately. */

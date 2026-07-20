@@ -22,13 +22,34 @@ const ALLOWED = new Set(
 );
 // Flip this secret to true to open the bot to anyone. Banned users stay banned:
 // promotion below checks banned_at, which auto-signup must never override.
-const OPEN_SIGNUPS = (Deno.env.get("OPEN_SIGNUPS") ?? "").trim().toLowerCase() === "true";
+const OPEN_SIGNUPS_ENV = (Deno.env.get("OPEN_SIGNUPS") ?? "").trim().toLowerCase() === "true";
+
+/** app_settings wins, env is the fallback — so opening/closing is one UPDATE. */
+async function openSignups() {
+  const { data } = await db.from("app_settings").select("value").eq("key", "open_signups").maybeSingle();
+  if (data?.value === true || data?.value === "true") return true;
+  if (data?.value === false || data?.value === "false") return false;
+  return OPEN_SIGNUPS_ENV;
+}
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL"),
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
   { auth: { persistSession: false } },
 );
+
+const WELCOME = [
+  "👋 Welcome to Pricewise.",
+  "",
+  "Paste any product link and I'll watch it for you — I check on a schedule and",
+  "message you when your size comes back in stock or the price drops.",
+  "",
+  "Two things worth knowing:",
+  "• My first message about an item is just a starting point, not a change.",
+  "• If the shop doesn't put your size in the link, use /size to pick one.",
+  "",
+  "Send /help any time for the full list of commands.",
+].join("\n");
 
 const HELP = [
   "🛍️ Pricewise — I watch your items and ping you when your size restocks or the price drops.",
@@ -95,9 +116,12 @@ async function handle(msg, chatId, fromId) {
   // ALLOWED_TELEGRAM_IDS is a bootstrap hatch; users.is_allowed is the truth the
   // CHECKER reads. Promote into the column so the two can never disagree —
   // otherwise someone allowed only by env gets commands but silently no alerts.
-  if (!user.is_allowed && (OPEN_SIGNUPS || ALLOWED.has(String(fromId)))) {
+  const isNew = !user.is_allowed;
+  if (isNew && (ALLOWED.has(String(fromId)) || (await openSignups()))) {
     await db.from("users").update({ is_allowed: true }).eq("id", user.id);
     user.is_allowed = true;
+    // First contact: lead with what the bot does, not with silence.
+    await reply(chatId, WELCOME);
   }
   if (!user.is_allowed) {
     return reply(chatId, `Pricewise is invite-only right now. Your Telegram ID is ${fromId} — ask the owner to add you.`);
@@ -344,7 +368,14 @@ async function setSize(user, chatId, ref, value) {
   await db.from("subscriptions")
     .update({ variant_id: String(hit.id), variant_label: hit.label, last_alert_status: null, last_alert_price: null })
     .eq("id", sub.id);
-  return reply(chatId, `👕 Got it — watching ${hit.label} on ${p.title}.\nI'll re-baseline on the next check and alert on that size only.`);
+
+  // ...and bring that check forward. Waiting for the normal cadence meant the
+  // size baseline landed HOURS later, by which time you've forgotten you asked —
+  // so a snapshot ("out of stock") reads like breaking news.
+  await db.from("tracked_products").update({ next_check_at: new Date().toISOString() }).eq("id", p.id);
+
+  const known = hit.available === false ? " (it's out of stock right now)" : hit.available ? " (in stock right now)" : "";
+  return reply(chatId, `👕 Got it — watching ${hit.label} on ${p.title}${known}.\nChecking that size now; you'll get its starting point in a few minutes.`);
 }
 
 /** Forgiving match: exact on any field first, then prefix, then substring. */

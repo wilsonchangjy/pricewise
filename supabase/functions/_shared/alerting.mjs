@@ -58,9 +58,15 @@ export function evaluate(item, prev, reading) {
       level: "info",
       text:
         `👀 Now watching ${item.label}\n` +
-        `Current: ${fmt(price, reading.currency)}` +
+        `Right now: ${fmt(price, reading.currency)}` +
         (off ? ` (${off}% off retail)` : "") +
-        (available ? "" : " — currently OUT OF STOCK"),
+        (available ? "" : " — OUT OF STOCK") + "\n" +
+        // Without this line a baseline reads like NEWS. A user who set a size hours
+        // ago sees "OUT OF STOCK" arrive out of nowhere and reasonably asks "did it
+        // come back and sell out again?" It didn't — this is just where we're starting.
+        (available
+          ? "That's the starting point, not a change — I'll only message again when something moves."
+          : "That's the starting point, not a change — I'll message you the moment it's back."),
     });
     patch.lastAlertPrice = price;
     patch.lastAlertStatus = available ? "in_stock" : "oos";
