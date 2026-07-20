@@ -14,6 +14,8 @@ import { labelFromUrl } from "../_shared/label.mjs";
 import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
 import { cleanUrl } from "../_shared/urlguard.mjs";
 import { formatHistory } from "../_shared/history.mjs";
+import { CATEGORIES, detectCategory, normalizeCategory } from "../_shared/category.mjs";
+import { matchVariant } from "../_shared/variants.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
@@ -60,6 +62,10 @@ const HELP = [
   "/size <n> <your size> — watch one size instead of the whole product",
   "/every <n> <3h|6h|12h|1d> — how often to check (default 6h)",
   "/history <n> [1m|3m|6m|1y] — price history since I started watching",
+  "",
+  "/prefs — your defaults and limits",
+  "/setsize <tops|bottoms|shoes> <size> — I'll use it on new items automatically",
+  "/setevery <3h|6h|12h|1d> — default check frequency for new items",
   "/remove <n> — stop tracking one",
   "/setprice <n> <price> — only alert me at/below this",
   "/pause <n> · /resume <n> — mute / unmute",
@@ -141,6 +147,9 @@ async function handle(msg, chatId, fromId) {
     case "size":    return setSize(user, chatId, intent.ref, intent.value);
     case "every":   return setEvery(user, chatId, intent.ref, intent.value);
     case "history": return showHistory(user, chatId, intent.ref, intent.value);
+    case "prefs":   return showPrefs(user, chatId);
+    case "setsize": return setDefaultSize(user, chatId, intent.category, intent.value);
+    case "setevery":return setDefaultEvery(user, chatId, intent.value);
     case "setkey":  return setKey(user, chatId, intent.key);
     default:        return reply(chatId, intent.message ?? "Unknown command. Try /help.");
   }
@@ -230,7 +239,7 @@ async function addItem(user, chatId, rawUrl) {
         fetch_strategy: plan.strategy,
         title: (await fetchTitle(url)) ?? labelFromUrl(url),
         variant_selector: selector,
-        check_interval_minutes: plan.intervalMinutes,
+        check_interval_minutes: preferredInterval(user, plan),
         next_check_at: new Date().toISOString(),
       })
       .select()
@@ -248,7 +257,17 @@ async function addItem(user, chatId, rawUrl) {
     .select("id").eq("user_id", user.id).eq("product_id", product.id).maybeSingle();
   if (existing) return reply(chatId, `Already on your list: ${product.title}\nUse /list to see it.`);
 
-  const { error } = await db.from("subscriptions").insert({ user_id: user.id, product_id: product.id });
+  // If they've told us a default size for this kind of garment, park it — the
+  // first successful check resolves it against the shop's real size labels.
+  const category = detectCategory(product.title, url);
+  const pendingSize = category ? (user.settings?.sizes ?? {})[category] : null;
+
+  const { error } = await db.from("subscriptions").insert({
+    user_id: user.id,
+    product_id: product.id,
+    interval_minutes: preferredInterval(user, plan),
+    pending_size: pendingSize ?? null,
+  });
   if (error) throw error;
 
   return reply(chatId, [
@@ -378,17 +397,6 @@ async function setSize(user, chatId, ref, value) {
   return reply(chatId, `👕 Got it — watching ${hit.label} on ${p.title}${known}.\nChecking that size now; you'll get its starting point in a few minutes.`);
 }
 
-/** Forgiving match: exact on any field first, then prefix, then substring. */
-function matchVariant(variants, input) {
-  const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const want = norm(input);
-  if (!want) return null;
-  const fields = (v) => [v.label, v.sizeCode, v.id].map(norm).filter(Boolean);
-  return variants.find((v) => fields(v).some((f) => f === want))
-    ?? variants.find((v) => fields(v).some((f) => f.startsWith(want)))
-    ?? variants.find((v) => fields(v).some((f) => f.includes(want)))
-    ?? null;
-}
 
 // ── /every ── how often YOU want this checked ────────────────────────────────
 async function setEvery(user, chatId, ref, value) {
@@ -443,4 +451,75 @@ async function showHistory(user, chatId, ref, range) {
   ]);
   const s = Array.isArray(stats) ? stats[0] : stats;
   return reply(chatId, formatHistory(p, s, points ?? [], days));
+}
+
+// ── preferences ─────────────────────────────────────────────────────────────
+// Stored on users.settings so they cost no schema churn:
+//   { sizes: { tops:"M", bottoms:"32", shoes:"UK9" }, interval_minutes: 360 }
+
+/** The interval a NEW item gets: the user's default, floored, and never faster
+ *  than daily for defended sites (those spend their own unblocker credits). */
+function preferredInterval(user, plan) {
+  if (plan.strategy === "unblocker") return DEFENDED_INTERVAL_MIN;
+  const pref = Number(user.settings?.interval_minutes);
+  if (!Number.isFinite(pref)) return plan.intervalMinutes;
+  return Math.max(MIN_INTERVAL_MIN, pref);
+}
+
+const intervalWord = (min) =>
+  Object.entries(INTERVAL_OPTIONS).find(([, v]) => v === Number(min))?.[0] ?? `${min}min`;
+
+async function showPrefs(user, chatId) {
+  const sizes = user.settings?.sizes ?? {};
+  const every = intervalWord(user.settings?.interval_minutes ?? FREE_INTERVAL_MIN);
+  const { count } = await db.from("subscriptions")
+    .select("id", { count: "exact", head: true }).eq("user_id", user.id);
+
+  const sizeLines = CATEGORIES.map(
+    (c) => `• ${c}: ${sizes[c] ? sizes[c] : "not set"}`,
+  );
+
+  return reply(chatId, [
+    "⚙️ Your defaults",
+    ...sizeLines,
+    `• check every: ${every}`,
+    "",
+    "Set them with /setsize shoes UK9 · /setevery 6h",
+    "New items pick these up automatically when I can tell what kind of thing they are.",
+    "",
+    "📏 Limits",
+    `• ${count ?? 0}/${MAX_ITEMS} items on your list`,
+    `• fastest check is 3h — most shops don't change prices faster than that, and`,
+    "  checking harder mostly earns blocks rather than earlier alerts",
+    `• bot-protected shops (Zara, ASOS…) are checked once a day on your own key`,
+  ].join("\n"));
+}
+
+async function setDefaultSize(user, chatId, categoryWord, size) {
+  const category = normalizeCategory(categoryWord);
+  if (!category) {
+    return reply(chatId, `I keep a default size for: ${CATEGORIES.join(", ")}.\ne.g. /setsize shoes UK9`);
+  }
+  const sizes = { ...(user.settings?.sizes ?? {}), [category]: size };
+  await db.from("users").update({ settings: { ...(user.settings ?? {}), sizes } }).eq("id", user.id);
+
+  return reply(chatId, [
+    `📏 Default ${category} size set to ${size}.`,
+    "I'll apply it to new items I can recognise as " + category + " — and tell you each time I do.",
+    "It never changes anything already on your list; use /size for those.",
+  ].join("\n"));
+}
+
+async function setDefaultEvery(user, chatId, value) {
+  const minutes = INTERVAL_OPTIONS[value];
+  if (!minutes) return reply(chatId, `Choose one of: ${Object.keys(INTERVAL_OPTIONS).join(", ")} — e.g. /setevery 6h`);
+  await db.from("users").update({
+    settings: { ...(user.settings ?? {}), interval_minutes: minutes },
+  }).eq("id", user.id);
+  return reply(chatId, [
+    `⏱️ New items will be checked every ${value}.`,
+    minutes <= MIN_INTERVAL_MIN
+      ? "That's the fastest I go. Shops rarely move faster, and hammering them earns blocks, not earlier alerts."
+      : "Change any single item with /every.",
+  ].join("\n"));
 }

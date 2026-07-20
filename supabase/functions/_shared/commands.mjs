@@ -56,6 +56,22 @@ export function parseCommand(text) {
       if (!ref || !value) return { cmd: "size", message: "Usage: /size <number from /list> <your size>  e.g. /size 2 M" };
       return { cmd: "size", ref, value };
     }
+    case "/prefs":
+    case "/preferences":
+      return { cmd: "prefs" };
+    case "/setsize": {
+      const [category, ...sizeWords] = rest;
+      const size = sizeWords.join(" ").trim();
+      if (!category || !size) {
+        return { cmd: "setsize", message: "Usage: /setsize <tops|bottoms|shoes> <your size>  e.g. /setsize shoes UK9" };
+      }
+      return { cmd: "setsize", category, value: size };
+    }
+    case "/setevery": {
+      const [value] = rest;
+      if (!value) return { cmd: "setevery", message: "Usage: /setevery <3h|6h|12h|1d> — the default for items you add from now on" };
+      return { cmd: "setevery", value: value.toLowerCase() };
+    }
     case "/history":
     case "/price": {
       const [ref, range] = rest;

@@ -11,6 +11,7 @@ import { selectAdapter } from "../_shared/adapters/index.mjs";
 import { evaluate } from "../_shared/alerting.mjs";
 import { sendMessage, isUnreachable } from "../_shared/telegram.mjs";
 import { contextLine } from "../_shared/history.mjs";
+import { matchVariant } from "../_shared/variants.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const BATCH_SIZE = Number(Deno.env.get("CHECK_BATCH_SIZE") ?? 20);
@@ -131,6 +132,26 @@ async function checkProduct(product) {
 }
 
 async function alertSubscriber(sub, product, prevReading, reading) {
+  // A saved default size ("shoes: UK9") parked at /add — now we finally know what
+  // this shop calls its sizes, so resolve it against the REAL labels. A default
+  // that doesn't match is dropped, never approximated: watching the wrong size is
+  // indistinguishable from working right up until the restock they miss.
+  if (sub.pending_size && !sub.variant_id) {
+    const hit = matchVariant(reading.variants, sub.pending_size);
+    if (hit) {
+      await db.from("subscriptions")
+        .update({ variant_id: String(hit.id), variant_label: hit.label, pending_size: null })
+        .eq("id", sub.id);
+      sub.variant_id = String(hit.id);
+      sub.variant_label = hit.label;
+      sub.appliedDefault = sub.pending_size;
+    } else {
+      await db.from("subscriptions").update({ pending_size: null }).eq("id", sub.id);
+      sub.unmatchedDefault = sub.pending_size;
+    }
+    sub.pending_size = null;
+  }
+
   const item = {
     id: String(product.id),
     label: sub.variant_label ? `${product.title} — ${sub.variant_label}` : product.title,
@@ -161,6 +182,20 @@ async function alertSubscriber(sub, product, prevReading, reading) {
     if (line) {
       for (const e of events) {
         if (e.kind === "price_drop" || e.kind === "target_hit") e.text += `\n${line}`;
+      }
+    }
+  }
+
+  // Whatever we decided about their default size, say so on the first message —
+  // an unannounced choice is one they can't correct.
+  if (sub.appliedDefault) {
+    for (const e of events) {
+      if (e.kind === "baseline") e.text += `\n(Using your saved size ${sub.appliedDefault} — /size to change.)`;
+    }
+  } else if (sub.unmatchedDefault) {
+    for (const e of events) {
+      if (e.kind === "baseline") {
+        e.text += `\n(Your saved size ${sub.unmatchedDefault} isn't offered here, so I'm watching every size. /size to pick one.)`;
       }
     }
   }
