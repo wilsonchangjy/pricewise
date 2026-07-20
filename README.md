@@ -19,12 +19,23 @@ just "is it in stock somewhere."
 ## Supported stores
 
 **Free to track** (no setup): any **Shopify** store, plus **Uniqlo, Mango, COS,
-Stradivarius, Bershka, & Other Stories, Wix stores**, and any site with standard
-product data. That's a huge slice of fashion retail.
+Wix stores**, and any site with standard product data. That's a huge slice of
+fashion retail.
 
-**Bot-protected stores** (Zara, Massimo Dutti, ASOS, …) need an unblocker, so
-they're opt-in: bring your own free [ScrapingBee](https://www.scrapingbee.com/)
-key with `/setkey` (up to 5 items, checked daily, on your own credits).
+**Bot-protected stores** (Zara, Massimo Dutti, Oysho, ASOS, Bershka,
+Stradivarius, & Other Stories) need an unblocker, so they're opt-in: bring your
+own key with `/setkey` (up to 5 items, checked daily, on your own credits).
+`/providers` lists the services that work and their free tiers — some renew
+monthly, which matters more than the headline number.
+
+Note for self-hosters: Inditex brands (Zara, Bershka, Stradivarius…) block
+datacentre IPs but not home connections, so if you run this from a residential
+network those adapters try direct first and cost you nothing.
+
+**Amazon** isn't supported. It blocks datacentre IPs outright, and going through
+an unblocker costs enough per check that one listing would consume a typical free
+tier. Tracking a specific size would work; watching every size of one garment
+would cost ~40x that.
 
 ## How it works
 

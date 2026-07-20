@@ -9,6 +9,7 @@
 // { storeId, catalogId, productId, size }.
 
 import { httpGet } from "../fetcher.mjs";
+import { fetchApiViaUnblocker } from "../unblocker.mjs";
 import { parseInditex } from "./inditex.mjs";
 
 const apiUrl = (sel) =>
@@ -16,13 +17,19 @@ const apiUrl = (sel) =>
   `/productsArray?productIds=${sel.productId}&appId=2&languageId=-1&locale=en_US`;
 
 /** @param {import("../types.mjs").Item} item */
-export async function readBershka(item) {
+export async function readBershka(item, ctx = {}) {
   const checkedAt = new Date().toISOString();
   const sel = item.variantSelector ?? {};
   if (!sel.storeId || !sel.catalogId || !sel.productId) {
     return { ok: false, kind: "parse", message: "bershka: variantSelector needs storeId/catalogId/productId", checkedAt };
   }
-  const r = await httpGet(apiUrl(sel), { headers: { accept: "application/json" } });
+  // Direct first — free, and it works from a residential IP (self-hosters).
+  // Inditex 403s datacentre addresses, so fall back to the subscriber's key.
+  let r = await httpGet(apiUrl(sel), { headers: { accept: "application/json" } });
+  if (!r.ok && ctx.unblockerKey) {
+    const un = await fetchApiViaUnblocker(apiUrl(sel), { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider });
+    if (un.ok) r = { ok: true, status: un.status, body: un.body };
+  }
   if (!r.ok) {
     const kind = r.status === 403 ? "blocked" : r.error === "timeout" ? "timeout" : "http";
     return { ok: false, kind, status: r.status, message: `bershka itxrest failed (${r.status || r.error})`, checkedAt };

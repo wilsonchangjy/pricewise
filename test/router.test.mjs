@@ -56,3 +56,17 @@ test("a non-URL is rejected cleanly", async () => {
   assert.equal(r.adapter, null);
   assert.equal(r.via, "invalid-url");
 });
+
+// Verified 2026-07-21 from the production (Supabase) IP: every Inditex endpoint,
+// API paths included, answers 403 "Service Unavailable" to a datacentre address.
+// These two were previously marked free on the strength of a residential test.
+test("Inditex brands are defended — their APIs 403 datacentre IPs", () => {
+  assert.equal(strategyFor("bershka"), "unblocker");
+  assert.equal(strategyFor("stradivarius"), "unblocker");
+});
+
+test("the genuinely free adapters stay free — all verified from production", () => {
+  for (const a of ["shopify", "wix", "uniqlo", "mango", "cos", "jsonld"]) {
+    assert.equal(strategyFor(a), "direct", a);
+  }
+});

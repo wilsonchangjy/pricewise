@@ -22,7 +22,13 @@ const HOST_MAP = [
 ];
 
 // Adapters that must go through the unblocker (credits). Everything else is free.
-const DEFENDED = new Set(["inditex", "zara", "asos", "stories"]);
+//
+// Bershka and Stradivarius were verified FREE during development — from a home
+// connection. From a datacentre IP every Inditex endpoint returns 403 "Service
+// Unavailable", API paths included: they block the address, not the route. The
+// adapters still try direct first (a self-hoster on a residential IP gets it for
+// nothing), but /add must tell cloud users the truth about needing a key.
+const DEFENDED = new Set(["inditex", "zara", "asos", "stories", "bershka", "stradivarius"]);
 
 export const strategyFor = (adapter) => (DEFENDED.has(adapter) ? "unblocker" : "direct");
 
