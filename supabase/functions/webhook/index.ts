@@ -19,6 +19,9 @@ const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
 const ALLOWED = new Set(
   (Deno.env.get("ALLOWED_TELEGRAM_IDS") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
 );
+// Flip this secret to true to open the bot to anyone. Banned users stay banned:
+// promotion below checks banned_at, which auto-signup must never override.
+const OPEN_SIGNUPS = (Deno.env.get("OPEN_SIGNUPS") ?? "").trim().toLowerCase() === "true";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL"),
@@ -82,10 +85,15 @@ async function handle(msg, chatId, fromId) {
 
   const user = await upsertUser(fromId, chatId);
 
+  // A ban is sticky and outranks everything below it.
+  if (user.banned_at) {
+    return reply(chatId, "This account no longer has access to Pricewise.");
+  }
+
   // ALLOWED_TELEGRAM_IDS is a bootstrap hatch; users.is_allowed is the truth the
-  // CHECKER reads. Promote env-allowed users into the column so the two can never
-  // disagree — otherwise someone allowed only by env gets commands but no alerts.
-  if (!user.is_allowed && ALLOWED.has(String(fromId))) {
+  // CHECKER reads. Promote into the column so the two can never disagree —
+  // otherwise someone allowed only by env gets commands but silently no alerts.
+  if (!user.is_allowed && (OPEN_SIGNUPS || ALLOWED.has(String(fromId)))) {
     await db.from("users").update({ is_allowed: true }).eq("id", user.id);
     user.is_allowed = true;
   }
@@ -176,6 +184,17 @@ async function addItem(user, chatId, rawUrl) {
   // One row per URL: N subscribers => 1 fetch.
   let { data: product } = await db.from("tracked_products").select("*").eq("url", url).maybeSingle();
   if (!product) {
+    // The global circuit breaker guards DISTINCT urls, because that's what costs
+    // a fetch and a readings row. Joining something already watched is always
+    // allowed — it adds a subscriber, not load.
+    const { data: cap } = await db.rpc("capacity_status");
+    const capacity = Array.isArray(cap) ? cap[0] : cap;
+    if (capacity?.at_capacity) {
+      console.warn(`/add refused at capacity: ${capacity.tracked}/${capacity.ceiling}`);
+      await db.rpc("log_site_request", { p_url: url });
+      return reply(chatId, "I'm at capacity right now and not taking on new products — I'd rather check the existing ones on time than check everything late. Try again later; anything already on your list keeps running.");
+    }
+
     const { data, error } = await db
       .from("tracked_products")
       .insert({
