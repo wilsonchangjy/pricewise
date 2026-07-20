@@ -91,8 +91,8 @@ export async function readAsos(item, ctx = {}) {
   const currency = item.currency ?? "SGD";
 
   const [sm, sp] = await Promise.all([
-    fetchApiViaUnblocker(summariesUrl(id, store, country), { apiKey: ctx.unblockerKey }),
-    fetchApiViaUnblocker(stockpriceUrl(id, store, currency), { apiKey: ctx.unblockerKey }),
+    fetchApiViaUnblocker(summariesUrl(id, store, country), { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider }),
+    fetchApiViaUnblocker(stockpriceUrl(id, store, currency), { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider }),
   ]);
   const bad = !sm.ok ? sm : !sp.ok ? sp : null;
   if (bad) {

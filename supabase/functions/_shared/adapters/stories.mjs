@@ -56,6 +56,7 @@ export async function readStories(item, ctx = {}) {
   const checkedAt = new Date().toISOString();
   const res = await fetchMaybeUnblocked(item, {
     apiKey: ctx.unblockerKey,
+    provider: ctx.unblockerProvider,
     country: "sg",
     validate: (html) => /"sizes"\s*:\s*\[[^\]]*"sku"/.test(html),
   });

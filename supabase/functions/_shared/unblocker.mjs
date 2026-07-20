@@ -1,38 +1,37 @@
-// Unblocker fetch with COST-TIERED escalation — Phase 1 (bring-your-own-key).
+// Unblocker fetch with COST-TIERED escalation — provider-agnostic.
 //
-// Unlike Phase 0 (a single global env key), Phase 1 passes the *subscriber's own*
-// ScrapingBee key in explicitly. No process.env / Deno.env here: callers thread
-// `apiKey` down, so this module stays pure and portable.
+// Phase 1 passes the *subscriber's own* key in explicitly (no process.env), and
+// as of the pluggable-provider change, their chosen PROVIDER too. Betting
+// onboarding on one vendor was a mistake waiting to happen: ScrapingBee's free
+// credits are a one-month trial, so every user would hit a wall in week five.
 //
-//   render_js (~5cr) -> render + premium_proxy (~25cr) -> + stealth (~75cr)
+// Escalation is unchanged in spirit:
+//   render (cheapest useful) -> + premium proxies -> + hardest anti-bot mode
 //
-// Defended sites are checked daily and capped per user (see policy), so a user's
-// free tier goes a long way.
+// We only climb when a tier comes back blocked, so the common case stays cheap.
 
 import { httpGet } from "./fetcher.mjs";
-
-const TIERS = [
-  { mode: "render", params: { render_js: "true" } },
-  { mode: "premium", params: { render_js: "true", premium_proxy: "true" } },
-  { mode: "stealth", params: { render_js: "true", stealth_proxy: "true" } },
-];
+import { PROVIDERS, DEFAULT_PROVIDER, buildRequestUrl } from "./providers.mjs";
 
 const looksBlocked = (status, body) =>
   status === 403 || status === 429 || status === 401 || !body ||
-  /<title>[^<]*(access denied|attention required|just a moment)/i.test(body);
+  /<title>[^<]*(access denied|attention required|just a moment|server busy)/i.test(body);
 
 /**
  * Escalate tiers until one returns a usable page.
  * @param {string} url
- * @param {{ apiKey?: string, country?: string, maxTier?: "render"|"premium"|"stealth" }} opts
+ * @param {{ apiKey?: string, provider?: string, country?: string, maxTier?: string }} opts
  */
-export async function fetchViaUnblockerTiered(url, { apiKey, country = "sg", maxTier } = {}) {
+export async function fetchViaUnblockerTiered(url, { apiKey, provider = DEFAULT_PROVIDER, country = "sg", maxTier } = {}) {
   if (!apiKey) return { ok: false, status: 0, body: "", mode: "none", ms: 0, error: "no unblocker key" };
-  const ladder = maxTier ? TIERS.slice(0, TIERS.findIndex((t) => t.mode === maxTier) + 1) : TIERS;
+  const p = PROVIDERS[provider];
+  if (!p) return { ok: false, status: 0, body: "", mode: "none", ms: 0, error: `unknown provider ${provider}` };
+
+  const ladder = maxTier ? p.tiers.slice(0, p.tiers.findIndex((t) => t.mode === maxTier) + 1) : p.tiers;
 
   let last = { ok: false, status: 0, body: "", mode: "none", ms: 0, error: "no tiers tried" };
   for (const tier of ladder) {
-    last = await scrapingbeeFetch(url, apiKey, { ...tier.params, country });
+    last = await providerFetch(provider, url, apiKey, country, tier.params);
     last.mode = tier.mode;
     if (last.ok && !looksBlocked(last.status, last.body)) return last;
   }
@@ -42,49 +41,51 @@ export async function fetchViaUnblockerTiered(url, { apiKey, country = "sg", max
 /**
  * Fetch a JSON API through the unblocker WITHOUT JS rendering (cheaper).
  * @param {string} url
- * @param {{ apiKey?: string, country?: string }} opts
+ * @param {{ apiKey?: string, provider?: string, country?: string }} opts
  */
-export async function fetchApiViaUnblocker(url, { apiKey, country = "sg" } = {}) {
+export async function fetchApiViaUnblocker(url, { apiKey, provider = DEFAULT_PROVIDER, country = "sg" } = {}) {
   if (!apiKey) return { ok: false, status: 0, body: "", error: "no unblocker key" };
-  const params = new URLSearchParams({ api_key: apiKey, url, render_js: "false", premium_proxy: "true" });
-  if (country) params.set("country_code", country);
-  try {
-    const r = await fetch(`https://app.scrapingbee.com/api/v1/?${params.toString()}`);
-    const body = await r.text();
-    return { ok: r.ok, status: r.status, body, cost: Number(r.headers.get("spb-cost") ?? 0) || undefined };
-  } catch (e) {
-    return { ok: false, status: 0, body: "", error: String(e?.message ?? e) };
-  }
+  const p = PROVIDERS[provider];
+  if (!p) return { ok: false, status: 0, body: "", error: `unknown provider ${provider}` };
+  return providerFetch(provider, url, apiKey, country, p.apiTier);
 }
 
 /**
  * Direct fetch first (free); escalate to the unblocker when the page is blocked
  * OR returns a 200 shell that lacks the data (`validate`).
  * @param {import("./types.mjs").Item} item
- * @param {{ apiKey?: string, country?: string, validate?: (html:string)=>boolean }} opts
+ * @param {{ apiKey?: string, provider?: string, country?: string, validate?: (html:string)=>boolean }} opts
  */
-export async function fetchMaybeUnblocked(item, { apiKey, country = "sg", validate } = {}) {
+export async function fetchMaybeUnblocked(item, { apiKey, provider = DEFAULT_PROVIDER, country = "sg", validate } = {}) {
   const direct = await httpGet(item.url, { headers: { accept: "text/html" } });
   const clean = direct.ok && !/captcha|are you human|access denied/i.test(direct.body);
   if (clean && (!validate || validate(direct.body))) {
     return { ok: true, html: direct.body, via: "direct", status: direct.status };
   }
   if (!apiKey) {
-    return { ok: false, via: "direct", status: direct.status, error: direct.error, message: `direct unusable (${direct.status || direct.error}${clean ? "; shell/needs render" : ""}) and no unblocker key on this subscription` };
+    return {
+      ok: false, via: "direct", status: direct.status, error: direct.error,
+      message: `direct unusable (${direct.status || direct.error}${clean ? "; shell/needs render" : ""}) and no unblocker key on this subscription`,
+    };
   }
-  const un = await fetchViaUnblockerTiered(item.url, { apiKey, country });
-  if (!un.ok) return { ok: false, via: `unblocker:${un.mode}`, status: un.status, error: un.error, message: `unblocker failed (${un.status || un.error}) at mode=${un.mode}` };
-  return { ok: true, html: un.body, via: `unblocker:${un.mode}`, status: un.status };
+  const un = await fetchViaUnblockerTiered(item.url, { apiKey, provider, country });
+  if (!un.ok) {
+    return {
+      ok: false, via: `${provider}:${un.mode}`, status: un.status, error: un.error,
+      message: `unblocker failed (${un.status || un.error}) at mode=${un.mode}`,
+    };
+  }
+  return { ok: true, html: un.body, via: `${provider}:${un.mode}`, status: un.status };
 }
 
-async function scrapingbeeFetch(url, key, { country, ...extra }) {
-  const params = new URLSearchParams({ api_key: key, url, ...extra });
-  if (country) params.set("country_code", country);
+async function providerFetch(provider, url, apiKey, country, tierParams) {
   const started = Date.now();
   try {
-    const res = await fetch(`https://app.scrapingbee.com/api/v1/?${params.toString()}`);
+    const requestUrl = buildRequestUrl(provider, url, { apiKey, country, tier: tierParams });
+    const res = await fetch(requestUrl);
     const body = await res.text();
-    const cost = Number(res.headers.get("spb-cost") ?? 0) || undefined;
+    // Every vendor reports cost on a different header; take whichever is present.
+    const cost = Number(res.headers.get("spb-cost") ?? res.headers.get("x-api-credits") ?? 0) || undefined;
     return { ok: res.ok, status: res.status, body, cost, ms: Date.now() - started, mode: "" };
   } catch (e) {
     return { ok: false, status: 0, body: "", ms: Date.now() - started, mode: "", error: String(e?.message ?? e) };

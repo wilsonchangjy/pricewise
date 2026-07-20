@@ -72,10 +72,12 @@ async function checkProduct(product) {
     return { ok: true, alerts: 0 };
   }
 
-  let unblockerKey;
+  let unblockerKey, unblockerProvider;
   if (product.fetch_strategy === "unblocker") {
-    const { data } = await db.rpc("get_unblocker_key_for_product", { p_product_id: product.id });
-    unblockerKey = data ?? undefined;
+    const { data } = await db.rpc("get_unblocker_for_product", { p_product_id: product.id });
+    const row = Array.isArray(data) ? data[0] : data;
+    unblockerKey = row?.api_key ?? undefined;
+    unblockerProvider = row?.provider ?? undefined;
   }
 
   const item = {
@@ -85,7 +87,7 @@ async function checkProduct(product) {
     adapter: product.adapter,
     variantSelector: product.variant_selector ?? {},
   };
-  const reading = await selectAdapter(product.adapter)(item, { unblockerKey });
+  const reading = await selectAdapter(product.adapter)(item, { unblockerKey, unblockerProvider });
 
   if (!reading.ok) {
     await recordFailure(product, reading.message, reading.kind, subs);

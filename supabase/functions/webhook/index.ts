@@ -16,6 +16,7 @@ import { cleanUrl } from "../_shared/urlguard.mjs";
 import { formatHistory } from "../_shared/history.mjs";
 import { CATEGORIES, detectCategory, normalizeCategory } from "../_shared/category.mjs";
 import { matchVariant } from "../_shared/variants.mjs";
+import { PROVIDERS, DEFAULT_PROVIDER, normalizeProvider, detectProvider, providerSummary } from "../_shared/providers.mjs";
 import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard,
   confirmRemoveKeyboard, backToItemKeyboard,
@@ -73,8 +74,9 @@ const HELP = [
   "/remove <n> — stop tracking one",
   "/setprice <n> <price> — only alert me at/below this",
   "/pause <n> · /resume <n> — mute / unmute",
-  "/setkey <key> — your own ScrapingBee key for bot-protected stores",
+  "/setkey <key> — your own unblocker key for bot-protected stores",
   "   (I delete that message from the chat the moment I read it)",
+  "/providers — which unblocker services work, and their free tiers",
   "/help — this message",
 ].join("\n");
 
@@ -166,7 +168,8 @@ async function handle(msg, chatId, fromId) {
     case "prefs":   return showPrefs(user, chatId);
     case "setsize": return setDefaultSize(user, chatId, intent.category, intent.value);
     case "setevery":return setDefaultEvery(user, chatId, intent.value);
-    case "setkey":  return setKey(user, chatId, intent.key);
+    case "setkey":  return setKey(user, chatId, intent.key, intent.providerWord);
+    case "providers": return showProviders(chatId);
     default:        return reply(chatId, intent.message ?? "Unknown command. Try /help.");
   }
 }
@@ -360,17 +363,57 @@ async function retireIfOrphaned(productId) {
   if (!count) await db.from("tracked_products").update({ status: "dead" }).eq("id", productId);
 }
 
-// ── /setkey ──────────────────────────────────────────────────────────────────
-async function setKey(user, chatId, key) {
-  if (!/^[A-Za-z0-9_\-=]{20,}$/.test(key)) {
-    return reply(chatId, "That doesn't look like a ScrapingBee API key. Copy it from your ScrapingBee dashboard and send /setkey <key> again.");
+// ── /setkey ─────────────────────────────────────────────────────────────────
+// Provider-aware: "/setkey scraperapi abc123" names it, "/setkey abc123" infers
+// it from the key's shape. Ambiguous keys are ASKED about, never guessed — a
+// wrong guess sends every future request to the wrong vendor and looks exactly
+// like a blocked site.
+async function setKey(user, chatId, key, providerWord) {
+  const named = providerWord ? normalizeProvider(providerWord) : null;
+  if (providerWord && !named) {
+    return reply(chatId, `I don't know the provider "${providerWord}". Try /providers to see the options.`);
   }
-  const { error } = await db.rpc("set_user_api_key", { p_user_id: user.id, p_key: key });
+
+  const provider = named ?? detectProvider(key);
+  if (!provider) {
+    return reply(chatId, [
+      "I can't tell which service that key is for — several use the same format.",
+      "Send it with the name, e.g.:",
+      "/setkey scraperapi <key>",
+      "",
+      "See /providers for the list.",
+    ].join("\n"));
+  }
+
+  const p = PROVIDERS[provider];
+  if (!p.keyPattern.test(String(key).trim())) {
+    return reply(chatId, `That doesn't look like a ${p.label} key. Copy it from your ${p.label} dashboard and try again.`);
+  }
+
+  const { error } = await db.rpc("set_user_api_key", {
+    p_user_id: user.id, p_key: String(key).trim(), p_provider: provider,
+  });
   if (error) throw error;
+
   return reply(chatId, [
-    "🔐 Key saved (encrypted) and your message deleted.",
+    `🔐 ${p.label} key saved (encrypted) and your message deleted.`,
     `You can now track bot-protected stores — up to ${MAX_DEFENDED} of them, checked once a day so your credits last.`,
+    p.verified ? "" : `Heads up: I haven't been able to test ${p.label} end to end yet, so tell me if a check fails and I'll dig in.`,
     "Paste one of those links to try it.",
+  ].filter(Boolean).join("\n"));
+}
+
+async function showProviders(chatId) {
+  const lines = providerSummary().map((p) =>
+    `• ${p.label}${p.verified ? "" : " (untested by me)"}\n  ${p.freeNote}\n  ${p.signup}`);
+  return sendMessage(BOT_TOKEN, chatId, [
+    "🔑 Bot-protected shops (Zara, Massimo Dutti, ASOS…) need an unblocker service.",
+    "Bring a free key from any of these — you stay in control of the spend:",
+    "",
+    ...lines,
+    "",
+    "Then: /setkey <provider> <key>",
+    "I delete that message the moment I read it.",
   ].join("\n"));
 }
 

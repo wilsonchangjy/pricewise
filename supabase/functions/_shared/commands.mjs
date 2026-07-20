@@ -83,9 +83,19 @@ export function parseCommand(text) {
       if (!ref || !value) return { cmd: "every", message: "Usage: /every <number from /list> <3h|6h|12h|1d>" };
       return { cmd: "every", ref, value: value.toLowerCase() };
     }
+    case "/providers":
+      return { cmd: "providers" };
     case "/setkey": {
       // Secret — tell the webhook to delete the user's message from the chat.
-      if (!arg) return { cmd: "setkey", redactMessage: false, message: "Usage: /setkey <your ScrapingBee key>" };
+      if (!arg) {
+        return { cmd: "setkey", redactMessage: false,
+                 message: "Usage: /setkey <key>  — or /setkey <provider> <key>. See /providers for the options." };
+      }
+      // "/setkey scraperapi abc123" names the vendor; "/setkey abc123" is inferred.
+      const parts = arg.split(/\s+/);
+      if (parts.length > 1) {
+        return { cmd: "setkey", providerWord: parts[0], key: parts.slice(1).join(""), redactMessage: true };
+      }
       return { cmd: "setkey", key: arg, redactMessage: true };
     }
     default:
