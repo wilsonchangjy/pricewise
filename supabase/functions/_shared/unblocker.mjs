@@ -5,24 +5,31 @@
 // onboarding on one vendor was a mistake waiting to happen: ScrapingBee's free
 // credits are a one-month trial, so every user would hit a wall in week five.
 //
-// Escalation is unchanged in spirit:
-//   render (cheapest useful) -> + premium proxies -> + hardest anti-bot mode
+// The ladder opens PLAIN and climbs only when a tier comes back blocked:
+//   plain -> render -> premium/super proxies -> hardest anti-bot mode
 //
-// We only climb when a tier comes back blocked, so the common case stays cheap.
+// Measured on Scrape.do 2026-07-21: Bershka, Stradivarius and ASOS all answer a
+// plain 1-credit request; Massimo Dutti needs render (5); Zara needs super (10).
+// Opening at "render" — as this did originally — overpaid 5x on the cheap three.
 
 import { httpGet } from "./fetcher.mjs";
 import { PROVIDERS, DEFAULT_PROVIDER, buildRequestUrl } from "./providers.mjs";
 
+// A block is not always a status code. Akamai answers 200 with a tiny
+// meta-refresh challenge (bm-verify), which sailed past the old title check and
+// got returned as a successful read — the Phase 0 "200 shell" trap again.
 const looksBlocked = (status, body) =>
   status === 403 || status === 429 || status === 401 || !body ||
-  /<title>[^<]*(access denied|attention required|just a moment|server busy)/i.test(body);
+  /<title>[^<]*(access denied|attention required|just a moment|server busy)/i.test(body) ||
+  /bm-verify|_abck|challenge-platform|Incapsula|__cf_chl/i.test(body) ||
+  (body.length < 5000 && /http-equiv=["\']?refresh/i.test(body));
 
 /**
  * Escalate tiers until one returns a usable page.
  * @param {string} url
  * @param {{ apiKey?: string, provider?: string, country?: string, maxTier?: string }} opts
  */
-export async function fetchViaUnblockerTiered(url, { apiKey, provider = DEFAULT_PROVIDER, country = "sg", maxTier } = {}) {
+export async function fetchViaUnblockerTiered(url, { apiKey, provider = DEFAULT_PROVIDER, country = "sg", maxTier, validate } = {}) {
   if (!apiKey) return { ok: false, status: 0, body: "", mode: "none", ms: 0, error: "no unblocker key" };
   const p = PROVIDERS[provider];
   if (!p) return { ok: false, status: 0, body: "", mode: "none", ms: 0, error: `unknown provider ${provider}` };
@@ -33,7 +40,11 @@ export async function fetchViaUnblockerTiered(url, { apiKey, provider = DEFAULT_
   for (const tier of ladder) {
     last = await providerFetch(provider, url, apiKey, country, tier.params);
     last.mode = tier.mode;
-    if (last.ok && !looksBlocked(last.status, last.body)) return last;
+    // "Not blocked" isn't the same as "has what we came for": a cheap tier can
+    // return a perfectly valid page that simply lacks the data. Keep climbing.
+    const usable = last.ok && !looksBlocked(last.status, last.body)
+      && (!validate || validate(last.body));
+    if (usable) return last;
   }
   return last;
 }
@@ -47,7 +58,15 @@ export async function fetchApiViaUnblocker(url, { apiKey, provider = DEFAULT_PRO
   if (!apiKey) return { ok: false, status: 0, body: "", error: "no unblocker key" };
   const p = PROVIDERS[provider];
   if (!p) return { ok: false, status: 0, body: "", error: `unknown provider ${provider}` };
-  return providerFetch(provider, url, apiKey, country, p.apiTier);
+
+  // Start plain: measured 2026-07-21, Bershka/Stradivarius/ASOS all answer a
+  // 1-credit plain request. Only pay for proxies when plain actually fails.
+  let last;
+  for (const tier of p.apiTiers ?? [{}]) {
+    last = await providerFetch(provider, url, apiKey, country, tier);
+    if (last.ok && !looksBlocked(last.status, last.body)) return last;
+  }
+  return last;
 }
 
 /**
@@ -68,7 +87,7 @@ export async function fetchMaybeUnblocked(item, { apiKey, provider = DEFAULT_PRO
       message: `direct unusable (${direct.status || direct.error}${clean ? "; shell/needs render" : ""}) and no unblocker key on this subscription`,
     };
   }
-  const un = await fetchViaUnblockerTiered(item.url, { apiKey, provider, country });
+  const un = await fetchViaUnblockerTiered(item.url, { apiKey, provider, country, validate });
   if (!un.ok) {
     return {
       ok: false, via: `${provider}:${un.mode}`, status: un.status, error: un.error,

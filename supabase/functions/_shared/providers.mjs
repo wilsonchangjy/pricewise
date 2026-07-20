@@ -12,7 +12,10 @@
 // 3am during a check.
 
 /**
- * Each provider maps our three escalation tiers onto its own parameters.
+ * Each provider maps our escalation ladder onto its own parameters. The ladder
+ * starts PLAIN because measurement beat assumption: Bershka, Stradivarius and
+ * ASOS all return usable data on a 1-credit plain request, where the old ladder
+ * opened at render (5 credits) and the API path forced a super proxy (10).
  * Tier meanings, consistent across vendors:
  *   render  — execute JS, cheapest useful tier
  *   premium — + better/residential proxies
@@ -29,13 +32,14 @@ export const PROVIDERS = {
     urlParam: "url",
     countryParam: "country_code",
     // ScrapingBee keys are long and alphanumeric.
-    keyPattern: /^[A-Za-z0-9]{40,}$/,
+    keyPattern: /^[A-Za-z0-9]{60,}$/, // observed: 80 alphanumeric
     tiers: [
+      { mode: "plain", params: {} },
       { mode: "render", params: { render_js: "true" } },
       { mode: "premium", params: { render_js: "true", premium_proxy: "true" } },
       { mode: "stealth", params: { render_js: "true", stealth_proxy: "true" } },
     ],
-    apiTier: { render_js: "false", premium_proxy: "true" },
+    apiTiers: [{}, { premium_proxy: "true" }],
   },
 
   scraperapi: {
@@ -51,11 +55,12 @@ export const PROVIDERS = {
     countryParam: "country_code",
     keyPattern: /^[a-f0-9]{32}$/i,
     tiers: [
+      { mode: "plain", params: {} },
       { mode: "render", params: { render: "true" } },
       { mode: "premium", params: { render: "true", premium: "true" } },
       { mode: "stealth", params: { render: "true", ultra_premium: "true" } },
     ],
-    apiTier: { render: "false", premium: "true" },
+    apiTiers: [{}, { premium: "true" }],
   },
 
   scrapedo: {
@@ -67,13 +72,15 @@ export const PROVIDERS = {
     keyParam: "token",
     urlParam: "url",
     countryParam: "geoCode",
-    keyPattern: /^[a-f0-9]{32}$/i, // exactly 32 hex — a longer alnum key is someone else's
+    keyPattern: /^[A-Za-z0-9]{32,55}$/, // observed: 43 alphanumeric
+    // Measured costs: plain 1, render 5, super 10.
     tiers: [
+      { mode: "plain", params: {} },
       { mode: "render", params: { render: "true" } },
-      { mode: "premium", params: { render: "true", super: "true" } },
-      { mode: "stealth", params: { render: "true", super: "true", geoCode: "sg" } },
+      { mode: "super", params: { super: "true" } },
+      { mode: "super_render", params: { render: "true", super: "true" } },
     ],
-    apiTier: { render: "false", super: "true" },
+    apiTiers: [{}, { super: "true" }],
   },
 };
 
