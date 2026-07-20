@@ -56,6 +56,12 @@ export function parseCommand(text) {
       if (!ref || !value) return { cmd: "size", message: "Usage: /size <number from /list> <your size>  e.g. /size 2 M" };
       return { cmd: "size", ref, value };
     }
+    case "/history":
+    case "/price": {
+      const [ref, range] = rest;
+      if (!ref) return { cmd: "history", message: "Usage: /history <number from /list> [1m|3m|6m|1y]" };
+      return { cmd: "history", ref, value: (range ?? "3m").toLowerCase() };
+    }
     case "/every": {
       const [ref, value] = rest;
       if (!ref || !value) return { cmd: "every", message: "Usage: /every <number from /list> <3h|6h|12h|1d>" };

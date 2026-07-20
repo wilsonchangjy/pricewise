@@ -13,6 +13,7 @@ import { sendMessage, deleteMessage } from "../_shared/telegram.mjs";
 import { labelFromUrl } from "../_shared/label.mjs";
 import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
 import { cleanUrl } from "../_shared/urlguard.mjs";
+import { formatHistory } from "../_shared/history.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
@@ -37,6 +38,7 @@ const HELP = [
   "/list — your tracked items",
   "/size <n> <your size> — watch one size instead of the whole product",
   "/every <n> <3h|6h|12h|1d> — how often to check (default 6h)",
+  "/history <n> [1m|3m|6m|1y] — price history since I started watching",
   "/remove <n> — stop tracking one",
   "/setprice <n> <price> — only alert me at/below this",
   "/pause <n> · /resume <n> — mute / unmute",
@@ -114,6 +116,7 @@ async function handle(msg, chatId, fromId) {
     case "setprice":return mutate(user, chatId, intent.ref, "setprice", intent.price);
     case "size":    return setSize(user, chatId, intent.ref, intent.value);
     case "every":   return setEvery(user, chatId, intent.ref, intent.value);
+    case "history": return showHistory(user, chatId, intent.ref, intent.value);
     case "setkey":  return setKey(user, chatId, intent.key);
     default:        return reply(chatId, intent.message ?? "Unknown command. Try /help.");
   }
@@ -392,4 +395,21 @@ async function subAt(user, chatId, ref) {
     return null;
   }
   return subs[n - 1];
+}
+
+// ── /history ── what we've actually seen, never more than that ───────────────
+const RANGE_DAYS = { "1m": 30, "3m": 90, "6m": 180, "1y": 365 };
+
+async function showHistory(user, chatId, ref, range) {
+  const days = RANGE_DAYS[range] ?? 90;
+  const sub = await subAt(user, chatId, ref);
+  if (!sub) return;
+  const p = sub.tracked_products;
+
+  const [{ data: stats }, { data: points }] = await Promise.all([
+    db.rpc("price_stats", { p_product_id: p.id, p_days: days }),
+    db.rpc("price_history", { p_product_id: p.id, p_days: days }),
+  ]);
+  const s = Array.isArray(stats) ? stats[0] : stats;
+  return reply(chatId, formatHistory(p, s, points ?? [], days));
 }

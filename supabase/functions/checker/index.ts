@@ -10,6 +10,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { selectAdapter } from "../_shared/adapters/index.mjs";
 import { evaluate } from "../_shared/alerting.mjs";
 import { sendMessage, isUnreachable } from "../_shared/telegram.mjs";
+import { contextLine } from "../_shared/history.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const BATCH_SIZE = Number(Deno.env.get("CHECK_BATCH_SIZE") ?? 20);
@@ -150,6 +151,19 @@ async function alertSubscriber(sub, product, prevReading, reading) {
     : null;
 
   const { events, patch } = evaluate(item, prev, reading);
+
+  // A drop alert asks a silent question: "is this actually a good price?" We can
+  // answer it from our own observations — carefully, since our history starts the
+  // day we first saw the item, not the day it went on sale.
+  if (events.some((e) => e.kind === "price_drop" || e.kind === "target_hit")) {
+    const { data: stats } = await db.rpc("price_stats", { p_product_id: product.id, p_days: 90 });
+    const line = contextLine(Array.isArray(stats) ? stats[0] : stats, 90);
+    if (line) {
+      for (const e of events) {
+        if (e.kind === "price_drop" || e.kind === "target_hit") e.text += `\n${line}`;
+      }
+    }
+  }
 
   const wanted = sub.alert_on ?? {};
   let sent = 0;
