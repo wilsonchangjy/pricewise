@@ -9,13 +9,17 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { parseCommand } from "../_shared/commands.mjs";
 import { planAdd, MAX_DEFENDED, MAX_ITEMS, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, FREE_INTERVAL_MIN, DEFENDED_INTERVAL_MIN } from "../_shared/policy.mjs";
 import { detectAdapter } from "../_shared/router.mjs";
-import { sendMessage, deleteMessage } from "../_shared/telegram.mjs";
+import { sendMessage, deleteMessage, editMessage, answerCallback } from "../_shared/telegram.mjs";
 import { labelFromUrl } from "../_shared/label.mjs";
 import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
 import { cleanUrl } from "../_shared/urlguard.mjs";
 import { formatHistory } from "../_shared/history.mjs";
 import { CATEGORIES, detectCategory, normalizeCategory } from "../_shared/category.mjs";
 import { matchVariant } from "../_shared/variants.mjs";
+import {
+  parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard,
+  confirmRemoveKeyboard, backToItemKeyboard,
+} from "../_shared/keyboards.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
@@ -80,6 +84,18 @@ Deno.serve(async (req) => {
   }
 
   const update = await req.json().catch(() => null);
+
+  // A tapped button, not a typed message.
+  if (update?.callback_query) {
+    try {
+      await handleCallback(update.callback_query);
+    } catch (e) {
+      console.error("callback error:", e);
+      await answerCallback(BOT_TOKEN, update.callback_query.id, "Something went wrong — try /list again.");
+    }
+    return ok();
+  }
+
   const msg = update?.message ?? update?.edited_message;
   const chatId = msg?.chat?.id;
   const fromId = msg?.from?.id;
@@ -302,7 +318,9 @@ async function listItems(user, chatId) {
     if (p.fetch_strategy === "unblocker") bits.push("daily/your key");
     return `${i + 1}. ${p.title}${bits.length ? `\n   ${bits.join(" · ")}` : ""}\n   ${p.url}`;
   });
-  return reply(chatId, `Tracking ${subs.length} item${subs.length > 1 ? "s" : ""}:\n\n${lines.join("\n\n")}`);
+  return sendMessage(BOT_TOKEN, chatId,
+    `Tracking ${subs.length} item${subs.length > 1 ? "s" : ""} — tap a number to change one:\n\n${lines.join("\n\n")}`,
+    { keyboard: listKeyboard(subs) });
 }
 
 // ── /remove /pause /resume /setprice — all address items by list number ──────
@@ -523,3 +541,191 @@ async function setDefaultEvery(user, chatId, value) {
       : "Change any single item with /every.",
   ].join("\n"));
 }
+
+// ── inline keyboard handling ────────────────────────────────────────────────
+// Every branch re-loads the subscription BY OWNER. callback_data is user-supplied
+// bytes: "i:12" is a claim about which item was tapped, not proof it's theirs.
+
+async function handleCallback(cq) {
+  const chatId = cq.message?.chat?.id;
+  const messageId = cq.message?.message_id;
+  const fromId = cq.from?.id;
+  const parsed = parseCallback(cq.data);
+  if (!chatId || !fromId || !parsed) return answerCallback(BOT_TOKEN, cq.id);
+
+  const user = await upsertUser(fromId, chatId);
+  if (user.banned_at || !user.is_allowed) {
+    return answerCallback(BOT_TOKEN, cq.id, "This account doesn't have access.", true);
+  }
+
+  const { action, subId, arg } = parsed;
+
+  if (action === "L") return renderList(user, chatId, messageId, cq.id);
+
+  const sub = subId === undefined ? null : await ownedSub(user.id, subId);
+  if (!sub) {
+    await answerCallback(BOT_TOKEN, cq.id, "That item isn't on your list any more.");
+    return renderList(user, chatId, messageId);
+  }
+
+  switch (action) {
+    case "i": return renderItem(sub, chatId, messageId, cq.id);
+    case "s": return renderSizes(sub, chatId, messageId, cq.id);
+    case "S": return applySize(sub, chatId, messageId, cq.id, arg);
+    case "e":
+      await answerCallback(BOT_TOKEN, cq.id);
+      return editMessage(BOT_TOKEN, chatId, messageId,
+        `⏱ How often should I check ${sub.tracked_products.title}?\n\nFastest is 3h — shops rarely move quicker, and checking harder mostly earns blocks.`,
+        { keyboard: everyKeyboard(sub.id) });
+    case "E": return applyEvery(sub, chatId, messageId, cq.id, arg);
+    case "h": return renderHistory(sub, chatId, messageId, cq.id);
+    case "p":
+    case "u": {
+      const status = action === "p" ? "paused" : "active";
+      await db.from("subscriptions").update({ status }).eq("id", sub.id);
+      sub.status = status;
+      await answerCallback(BOT_TOKEN, cq.id, status === "paused" ? "Muted" : "Unmuted");
+      return renderItem(sub, chatId, messageId);
+    }
+    case "r":
+      await answerCallback(BOT_TOKEN, cq.id);
+      return editMessage(BOT_TOKEN, chatId, messageId,
+        `Stop tracking ${sub.tracked_products.title}?`,
+        { keyboard: confirmRemoveKeyboard(sub.id) });
+    case "R": {
+      await db.from("subscriptions").delete().eq("id", sub.id);
+      await retireIfOrphaned(sub.tracked_products.id);
+      await answerCallback(BOT_TOKEN, cq.id, "Removed");
+      return renderList(user, chatId, messageId);
+    }
+    default:
+      return answerCallback(BOT_TOKEN, cq.id);
+  }
+}
+
+/** The ownership check every callback depends on. */
+async function ownedSub(userId, subId) {
+  const { data } = await db
+    .from("subscriptions")
+    .select("id, status, target_price, last_alert_price, variant_id, variant_label, interval_minutes, tracked_products(id, url, title, fetch_strategy)")
+    .eq("id", subId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+async function renderList(user, chatId, messageId, cqId) {
+  if (cqId) await answerCallback(BOT_TOKEN, cqId);
+  const subs = await subscriptionList(user.id);
+  if (!subs.length) {
+    return editMessage(BOT_TOKEN, chatId, messageId, "Your list is empty — paste a product link to start tracking.");
+  }
+  const lines = subs.map((s, i) => `${i + 1}. ${s.tracked_products.title}`);
+  return editMessage(BOT_TOKEN, chatId, messageId,
+    `Tracking ${subs.length} item${subs.length > 1 ? "s" : ""} — tap a number to change one:\n\n${lines.join("\n")}`,
+    { keyboard: listKeyboard(subs) });
+}
+
+async function renderItem(sub, chatId, messageId, cqId) {
+  if (cqId) await answerCallback(BOT_TOKEN, cqId);
+  const p = sub.tracked_products;
+  const bits = [
+    sub.variant_label ? `Watching: ${sub.variant_label}` : "Watching: every size",
+    `Checked every ${intervalWord(sub.interval_minutes ?? FREE_INTERVAL_MIN)}`,
+    sub.last_alert_price != null ? `Last seen at ${sub.last_alert_price}` : null,
+    sub.target_price != null ? `Alerting below ${sub.target_price}` : null,
+    sub.status === "paused" ? "Currently muted" : null,
+  ].filter(Boolean);
+
+  return editMessage(BOT_TOKEN, chatId, messageId, `${p.title}\n${bits.join("\n")}\n${p.url}`,
+    { keyboard: itemKeyboard(sub.id, { paused: sub.status === "paused" }) });
+}
+
+/** The point of the whole feature: pick from what the shop ACTUALLY offers. */
+async function renderSizes(sub, chatId, messageId, cqId) {
+  const p = sub.tracked_products;
+  const { data: rows } = await db.from("product_readings")
+    .select("variants").eq("product_id", p.id)
+    .order("checked_at", { ascending: false }).limit(1);
+  const variants = (rows?.[0]?.variants ?? []).filter((v) => v && v.label);
+
+  if (!variants.length) {
+    await answerCallback(BOT_TOKEN, cqId, "I haven't read this one yet — try again after the next check.");
+    return renderItem(sub, chatId, messageId);
+  }
+  await answerCallback(BOT_TOKEN, cqId);
+  return editMessage(BOT_TOKEN, chatId, messageId,
+    `📏 Which size of ${p.title}?\n✖️ = sold out right now (still worth watching — that's the point).`,
+    { keyboard: sizeKeyboard(sub.id, variants, sub.variant_id) });
+}
+
+async function applySize(sub, chatId, messageId, cqId, variantId) {
+  const p = sub.tracked_products;
+
+  if (variantId === "*") {
+    await db.from("subscriptions")
+      .update({ variant_id: null, variant_label: null, last_alert_status: null, last_alert_price: null })
+      .eq("id", sub.id);
+    sub.variant_id = null; sub.variant_label = null;
+    await answerCallback(BOT_TOKEN, cqId, "Watching every size");
+    await bringCheckForward(p.id);
+    return renderItem(sub, chatId, messageId);
+  }
+
+  const { data: rows } = await db.from("product_readings")
+    .select("variants").eq("product_id", p.id)
+    .order("checked_at", { ascending: false }).limit(1);
+  const hit = (rows?.[0]?.variants ?? []).find((v) => String(v.id) === String(variantId));
+  if (!hit) {
+    await answerCallback(BOT_TOKEN, cqId, "That size isn't listed any more.");
+    return renderSizes(sub, chatId, messageId, cqId);
+  }
+
+  // Clearing the dedup state re-baselines on the chosen size, so the next check
+  // reports where THAT size stands instead of staying quiet.
+  await db.from("subscriptions")
+    .update({ variant_id: String(hit.id), variant_label: hit.label, last_alert_status: null, last_alert_price: null })
+    .eq("id", sub.id);
+  sub.variant_id = String(hit.id); sub.variant_label = hit.label;
+
+  await answerCallback(BOT_TOKEN, cqId, `Watching ${hit.label}`);
+  await bringCheckForward(p.id);
+  return renderItem(sub, chatId, messageId);
+}
+
+async function applyEvery(sub, chatId, messageId, cqId, value) {
+  const minutes = INTERVAL_OPTIONS[value];
+  const p = sub.tracked_products;
+  if (!minutes) return answerCallback(BOT_TOKEN, cqId);
+
+  if (p.fetch_strategy === "unblocker" && minutes < DEFENDED_INTERVAL_MIN) {
+    return answerCallback(BOT_TOKEN, cqId, "Bot-protected shops stay on a daily check — it's your own credits.", true);
+  }
+  await db.from("subscriptions").update({ interval_minutes: minutes }).eq("id", sub.id);
+  sub.interval_minutes = minutes;
+
+  const { data: all } = await db.from("subscriptions")
+    .select("interval_minutes").eq("product_id", p.id).eq("status", "active");
+  const effective = Math.max(MIN_INTERVAL_MIN,
+    Math.min(...(all ?? []).map((x) => x.interval_minutes ?? FREE_INTERVAL_MIN), FREE_INTERVAL_MIN));
+  await db.from("tracked_products").update({ check_interval_minutes: effective }).eq("id", p.id);
+
+  await answerCallback(BOT_TOKEN, cqId, `Every ${value}`);
+  return renderItem(sub, chatId, messageId);
+}
+
+async function renderHistory(sub, chatId, messageId, cqId) {
+  await answerCallback(BOT_TOKEN, cqId);
+  const p = sub.tracked_products;
+  const [{ data: stats }, { data: points }] = await Promise.all([
+    db.rpc("price_stats", { p_product_id: p.id, p_days: 90 }),
+    db.rpc("price_history", { p_product_id: p.id, p_days: 90 }),
+  ]);
+  return editMessage(BOT_TOKEN, chatId, messageId,
+    formatHistory(p, Array.isArray(stats) ? stats[0] : stats, points ?? [], 90),
+    { keyboard: backToItemKeyboard(sub.id) });
+}
+
+/** A size change should be answered by the next tick, not in six hours. */
+const bringCheckForward = (productId) =>
+  db.from("tracked_products").update({ next_check_at: new Date().toISOString() }).eq("id", productId);

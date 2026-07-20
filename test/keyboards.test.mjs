@@ -1,0 +1,70 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard, confirmRemoveKeyboard,
+} from "../supabase/functions/_shared/keyboards.mjs";
+
+const allData = (kb) => kb.inline_keyboard.flat().map((b) => b.callback_data);
+
+test("callback data stays inside Telegram's 64-byte cap", () => {
+  const variants = Array.from({ length: 24 }, (_, i) => ({ id: `519188937-251-${i}`, label: `EU ${36 + i}`, available: true }));
+  for (const d of allData(sizeKeyboard(999999, variants))) {
+    assert.ok(Buffer.byteLength(d, "utf8") <= 64, `${d} is ${Buffer.byteLength(d)} bytes`);
+  }
+});
+
+test("parseCallback round-trips, including ids containing colons", () => {
+  assert.deepEqual(parseCallback("i:12"), { action: "i", subId: 12, arg: undefined });
+  assert.deepEqual(parseCallback("S:12:519188937-251-2"), { action: "S", subId: 12, arg: "519188937-251-2" });
+  assert.deepEqual(parseCallback("E:7:12h"), { action: "E", subId: 7, arg: "12h" });
+  assert.equal(parseCallback("L").subId, undefined, "a list button carries no item");
+});
+
+test("hostile callback data parses without throwing or inventing an id", () => {
+  for (const junk of ["", "::::", "i:abc", "i:-1:../../etc", "💥:1"]) {
+    const parsed = parseCallback(junk);
+    if (parsed?.subId !== undefined) assert.ok(Number.isInteger(parsed.subId), junk);
+  }
+});
+
+test("the size picker shows what the shop offers, marking stock and choice", () => {
+  const variants = [
+    { id: "a", label: "UK8/EU42", available: true },
+    { id: "b", label: "UK9/EU43", available: false },
+    { id: "c", label: "UK10/EU44", available: true },
+  ];
+  const kb = sizeKeyboard(5, variants, "c");
+  const labels = kb.inline_keyboard.flat().map((b) => b.text);
+  assert.ok(labels.some((l) => l === "UK8/EU42"), "in stock: no marker");
+  assert.ok(labels.some((l) => l.startsWith("✖️")), "sold out is marked");
+  assert.ok(labels.some((l) => l.startsWith("✅")), "the current choice is marked");
+  assert.ok(labels.includes("Any size"), "there must be a way back to watching everything");
+});
+
+test("long size labels are truncated so buttons stay readable", () => {
+  const kb = sizeKeyboard(1, [{ id: "x", label: "Extra Extra Large Tall Fit Something", available: true }]);
+  assert.ok(kb.inline_keyboard[0][0].text.length <= 18);
+});
+
+test("list numbering maps to subscription ids, five per row", () => {
+  const subs = Array.from({ length: 12 }, (_, i) => ({ id: 100 + i }));
+  const kb = listKeyboard(subs);
+  assert.equal(kb.inline_keyboard[0].length, 5);
+  assert.equal(kb.inline_keyboard[0][0].text, "1");
+  assert.equal(kb.inline_keyboard[0][0].callback_data, "i:100");
+  assert.equal(kb.inline_keyboard[2][1].text, "12");
+});
+
+test("removal asks before doing", () => {
+  const kb = confirmRemoveKeyboard(3);
+  assert.deepEqual(allData(kb), ["R:3", "i:3"]);
+});
+
+test("pause and resume swap, so the button always shows the next action", () => {
+  assert.ok(allData(itemKeyboard(1, { paused: false })).includes("p:1"));
+  assert.ok(allData(itemKeyboard(1, { paused: true })).includes("u:1"));
+});
+
+test("every-keyboard offers exactly the supported intervals", () => {
+  assert.deepEqual(allData(everyKeyboard(2)), ["E:2:3h", "E:2:6h", "E:2:12h", "E:2:1d", "i:2"]);
+});

@@ -31,6 +31,30 @@ export const sendMessage = (token, chatId, text, opts = {}) =>
     chat_id: chatId,
     text: String(text).slice(0, 4000),
     disable_web_page_preview: !opts.preview,
+    ...(opts.keyboard && { reply_markup: opts.keyboard }),
+  });
+
+/**
+ * Edit a message in place. Drilling list -> item -> size reuses ONE message
+ * instead of leaving a trail of dead menus in a chat people keep for months.
+ */
+export const editMessage = (token, chatId, messageId, text, opts = {}) =>
+  call(token, "editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text: String(text).slice(0, 4000),
+    disable_web_page_preview: !opts.preview,
+    ...(opts.keyboard && { reply_markup: opts.keyboard }),
+  });
+
+/**
+ * MUST be called for every callback_query, even on failure — otherwise the
+ * client spins forever on the button the user just tapped.
+ */
+export const answerCallback = (token, callbackId, text = "", alert = false) =>
+  call(token, "answerCallbackQuery", {
+    callback_query_id: callbackId,
+    ...(text && { text, show_alert: alert }),
   });
 
 /** Used to scrub /setkey out of the chat history immediately. */
