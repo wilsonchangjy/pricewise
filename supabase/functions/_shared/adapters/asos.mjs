@@ -14,6 +14,7 @@
 // variantSelector { productId, size } where size is the brandSize ("M").
 
 import { fetchApiViaUnblocker } from "../unblocker.mjs";
+import { STATE, isBuyable } from "../stock.mjs";
 
 const KEY_STORE_DATAVERSION = "7qyyrb1-46"; // ASOS catalogue version; refresh if the calls start failing
 const CAT = "https://www.asos.com/api/product/catalogue/v4";
@@ -51,12 +52,17 @@ export function parseAsos(summaries, stockprice, item) {
 
   const variants = product.variants.map((v) => {
     const st = stockById.get(String(v.id)) ?? {};
+    // ASOS tells us "nearly gone" and we were throwing it away.
+    const state = st.isInStock === true
+      ? (st.isLowInStock === true ? STATE.LOW_STOCK : STATE.IN_STOCK)
+      : STATE.OUT_OF_STOCK;
     return {
+      state,
       id: String(v.id),
       label: String(v.brandSize ?? v.displaySizeText ?? v.id),
       price,
       compareAtPrice: compareAt,
-      available: st.isInStock === true,
+      available: isBuyable(state),
       sizeCode: v.brandSize != null ? String(v.brandSize) : undefined,
     };
   });

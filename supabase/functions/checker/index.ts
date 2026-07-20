@@ -269,7 +269,7 @@ function readingChanged(prev, next, prevRow) {
 
 const sig = (variants) =>
   (variants ?? [])
-    .map((v) => `${v.id}:${v.available ? 1 : 0}:${v.price ?? ""}`)
+    .map((v) => `${v.id}:${v.available ? 1 : 0}:${v.state ?? ""}:${v.price ?? ""}`)
     .sort()
     .join("|");
 

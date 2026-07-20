@@ -15,6 +15,10 @@
 
 const LOW_STOCK_RATIO = 0.4; // <=40% of variants left = "running low"
 
+// Stock states the shop told us about, as opposed to ratios we inferred.
+const COMING_SOON = "coming_soon";
+const LOW_STOCK = "low_stock";
+
 // A price increase only alerts if it's meaningful. NOTE: PRICE_UP_ABS is in the
 // item's own currency units, so it's naive across very different currencies
 // (JPY 10 is tiny); fine for SGD/USD, revisit when we track e.g. JPY items.
@@ -42,6 +46,7 @@ export function evaluate(item, prev, reading) {
   const chosen = item.variantId
     ? reading.variants.find((v) => v.id === String(item.variantId))
     : undefined;
+  const chosenState = chosen?.state;
   const price = chosen?.price ?? reading.price;
   const available = chosen ? chosen.available : reading.available;
   const total = reading.variants.length;
@@ -76,20 +81,41 @@ export function evaluate(item, prev, reading) {
   const prevStatus = prev.lastAlertStatus ?? (prev.lastReading.available ? "in_stock" : "oos");
 
   // --- Availability transitions ---
-  if (available && prevStatus === "oos") {
+  // "coming" is a NOT-BUYABLE status, so it must count as a restock trigger too.
+  // Missing this meant an item that announced its return and then arrived went
+  // silent — losing the restock alert precisely for the items we'd promised it on.
+  if (available && (prevStatus === "oos" || prevStatus === "coming")) {
     events.push({
       kind: "restock",
       level: "alert",
       text: `✅ BACK IN STOCK: ${item.label}\n${fmt(price, reading.currency)}\n${item.url}`,
     });
     patch.lastAlertStatus = "in_stock";
-  } else if (!available && prevStatus !== "oos") {
+  } else if (!available && chosenState === COMING_SOON && prevStatus !== "coming") {
+    // The earliest signal this product can give: announced, not yet orderable.
+    // Worth its own message — "sold out" would be both wrong and discouraging.
+    events.push({
+      kind: "coming_soon",
+      level: "alert",
+      text: `🔜 COMING BACK: ${item.label}\nThe shop has it listed as coming soon — I'll tell you the moment it's buyable.\n${item.url}`,
+    });
+    patch.lastAlertStatus = "coming";
+  } else if (!available && prevStatus !== "oos" && chosenState !== COMING_SOON) {
     events.push({
       kind: "oos",
       level: "alert",
       text: `⛔ SOLD OUT: ${item.label}\n${item.url}`,
     });
     patch.lastAlertStatus = "oos";
+  } else if (available && chosenState === LOW_STOCK && prevStatus !== "low") {
+    // The shop itself says this size is nearly gone — far better evidence than
+    // our ratio heuristic, which only sees how many OTHER sizes are left.
+    events.push({
+      kind: "low_stock",
+      level: "alert",
+      text: `⚠️ NEARLY GONE: ${item.label}\nThe shop lists your size as low stock.\n${item.url}`,
+    });
+    patch.lastAlertStatus = "low";
   } else if (available && total > 0) {
     // --- Low stock (best-effort): still buyable, but sizes are selling through ---
     const ratio = inStockCount / total;

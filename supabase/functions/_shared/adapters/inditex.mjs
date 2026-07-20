@@ -25,6 +25,7 @@
 // trimmed fixture (test/fixtures/massimodutti-state.html).
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
+import { STATE, isBuyable, stateFromVisibility } from "../stock.mjs";
 
 const IN_STOCK = "SHOW"; // the only value that means "buy it now"
 const OUT_OF_STOCK = "SOLD_OUT"; // known sold-out marker
@@ -82,12 +83,16 @@ export function parseInditex(html, item) {
   const variants = sizes.map((s) => {
     const price = cents(s.priceInfo?.price) ?? cents(s.price);
     const oldPrice = cents(s.priceInfo?.oldPrice) ?? cents(s.oldPrice);
+    // COMING_SOON used to collapse into "sold out", losing the earliest signal
+    // this product can give anyone: it's announced and on its way back.
+    const stockState = stateFromVisibility(s.visibilityValue);
     return {
       id: String(s.sku),
       label: String(s.name ?? s.sku),
       price,
       compareAtPrice: oldPrice && price != null && oldPrice > price ? oldPrice : undefined,
-      available: s.visibilityValue === IN_STOCK,
+      available: isBuyable(stockState),
+      state: stockState,
       sizeCode: s.name != null ? String(s.name) : undefined,
     };
   });

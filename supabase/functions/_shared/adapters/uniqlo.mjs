@@ -24,6 +24,7 @@
 // client id, re-grab it from a product page's l2s request (DevTools > Network).
 
 import { httpGet } from "../fetcher.mjs";
+import { isBuyable, stateFromUniqlo } from "../stock.mjs";
 
 const CLIENT_ID = "uq.sg.web-spa"; // static public token; required or the API 400s
 
@@ -69,7 +70,8 @@ export function parseUniqlo(data, item) {
       label: `colour ${colorCode ?? "?"} / size ${sizeCode ?? "?"}`,
       price,
       compareAtPrice: promo != null && base != null && base > promo ? base : undefined,
-      available: inStock(stock.statusCode, stock.quantity),
+      available: isBuyable(stateFromUniqlo(stock.statusCode, stock.quantity)),
+      state: stateFromUniqlo(stock.statusCode, stock.quantity),
       colorCode: colorCode != null ? String(colorCode) : undefined,
       sizeCode: sizeCode != null ? String(sizeCode) : undefined,
     };
