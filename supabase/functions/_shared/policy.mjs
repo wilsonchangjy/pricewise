@@ -22,7 +22,8 @@ export const TIER_COST = { plain: 1, render: 5, premium: 5, super: 10, super_ren
 // What each defended brand needs BEFORE its first check teaches us for certain.
 export const ADAPTER_TIER = {
   bershka: "plain", stradivarius: "plain", asos: "plain", amazon: "plain",
-  inditex: "render", stories: "render", zara: "super",
+  stories: "plain", // measured 2026-07-21: answers a plain request, not render
+  inditex: "render", zara: "super",
 };
 
 // Cadence by cost, not by the blunt "is it defended". A 1-credit check every 6h

@@ -88,7 +88,78 @@ test("every fixture is small enough to read in a diff", () => {
   const budget = 12_000; // bytes
   for (const f of ["shopify-drmartens.json", "uniqlo-l2s.json", "mango-prices.json",
                    "mango-stock.json", "cos-item.json", "jsonld-product.html",
-                   "wix-product.html", "amazon-sg-product.html", "amazon-sg-unavailable.html"]) {
+                   "wix-product.html", "amazon-sg-product.html", "amazon-sg-unavailable.html",
+                   "bershka-itxrest.json", "stradivarius-itxrest.json", "inditex-massimodutti.html",
+                   "stories-product.html", "zara-productgroup.html", "asos-product.json"]) {
     assert.ok(fx(f).length < budget, `${f} is ${fx(f).length}b — trim it further`);
   }
+});
+
+// ── defended adapters, captured through the unblocker on 2026-07-21 ──────────
+import { parseInditex } from "../supabase/functions/_shared/adapters/inditex.mjs";
+import { parseStories } from "../supabase/functions/_shared/adapters/stories.mjs";
+import { parseAsos } from "../supabase/functions/_shared/adapters/asos.mjs";
+
+const asScript = (o) => `<script type="application/json">${JSON.stringify(o)}</script>`;
+
+// THE CASE THAT CAUGHT A PRODUCTION BUG: every size of this live Bershka product
+// is COMING_SOON, and the vocabulary guard rejected the whole product as "stock
+// field changed" — a state we understand, refused for being the only one present.
+test("bershka: an all-COMING_SOON product parses instead of being refused", () => {
+  const r = parseInditex(asScript(json("bershka-itxrest.json")), { label: "Bershka", currency: "SGD" });
+  assert.equal(r.ok, true);
+  assert.equal(r.available, false, "coming soon is not buyable yet");
+  assert.deepEqual([...new Set(r.variants.map((v) => v.state))], ["coming_soon"]);
+  assert.deepEqual(r.variants.map((v) => v.label), ["S", "M", "L"]);
+});
+
+test("inditex: a genuinely renamed stock field is STILL refused", () => {
+  const r = parseInditex(asScript({ sizes: [{ sku: 1, name: "M", visibilityValue: "SOMETHING_NEW" }] }), { label: "x" });
+  assert.equal(r.ok, false);
+  assert.match(r.message, /unrecognised visibilityValue/);
+});
+
+test("stradivarius: itxrest sizes parse with prices", () => {
+  const r = parseInditex(asScript(json("stradivarius-itxrest.json")), { label: "Strad", currency: "EUR" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 29.99);
+  assert.equal(r.variants.length, 4);
+});
+
+test("massimo dutti: mixed sold-out and in-stock sizes from one page", () => {
+  const r = parseInditex(fx("inditex-massimodutti.html"), { label: "MD", currency: "SGD" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 69);
+  const states = new Set(r.variants.map((v) => v.state));
+  assert.ok(states.has("in_stock") && states.has("out_of_stock"), "the mix is the point — per-size stock is the wedge");
+});
+
+test("& Other Stories: per-size array plus JSON-LD price", () => {
+  const r = parseStories(fx("stories-product.html"), { label: "OS", currency: "USD" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 219);
+  assert.equal(r.variants.length, 4);
+});
+
+test("zara: ProductGroup gives real per-size availability", () => {
+  const r = parseJsonLd(fx("zara-productgroup.html"), { label: "Zara", currency: "SGD" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 39.9);
+  assert.equal(r.available, false, "this one was sold out when captured");
+  assert.equal(r.variants.length, 4);
+});
+
+test("asos: summaries + stockprice merge, with the shop's low-stock flag", () => {
+  const a = json("asos-product.json");
+  const r = parseAsos(a.summaries, a.stockprice, { label: "ASOS", currency: "SGD" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 94.99);
+  assert.ok(new Set(r.variants.map((v) => v.state)).has("low_stock"), "ASOS tells us 'nearly gone' and we keep it");
+});
+
+test("asos: a wrong-currency response is refused, not mislabelled", () => {
+  const a = json("asos-product.json");
+  const r = parseAsos(a.summaries, a.stockprice, { label: "ASOS", currency: "USD" });
+  assert.equal(r.ok, false);
+  assert.match(r.message, /wrong store/);
 });

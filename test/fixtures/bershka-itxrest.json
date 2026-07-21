@@ -1,0 +1,39 @@
+{
+ "products": [
+  {
+   "bundleProductSummaries": [
+    {
+     "detail": {
+      "colors": [
+       {
+        "sizes": [
+         {
+          "sku": 228087062,
+          "name": "S",
+          "visibilityValue": "COMING_SOON",
+          "price": "8990",
+          "oldPrice": null
+         },
+         {
+          "sku": 228087065,
+          "name": "M",
+          "visibilityValue": "COMING_SOON",
+          "price": "8990",
+          "oldPrice": null
+         },
+         {
+          "sku": 228087064,
+          "name": "L",
+          "visibilityValue": "COMING_SOON",
+          "price": "8990",
+          "oldPrice": null
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

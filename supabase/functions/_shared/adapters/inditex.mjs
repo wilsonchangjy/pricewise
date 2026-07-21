@@ -70,8 +70,17 @@ export function parseInditex(html, item) {
   // Vocabulary guard: if we recognise NONE of the stock markers, Inditex likely
   // renamed them — refuse rather than silently report everything out of stock
   // (a false "sold out" is bad; a false "in stock" is worse). Surfaced upstream.
+  //
+  // COMING_SOON counts as recognised. It didn't when this guard was written, and
+  // a real Bershka product whose every size was COMING_SOON got rejected as
+  // "stock field changed" — a whole product refused for being entirely in a
+  // state we understand perfectly well.
+  const known = (v) => {
+    const u = String(v ?? "").toUpperCase();
+    return u === IN_STOCK || u === OUT_OF_STOCK || u.includes("COMING");
+  };
   const vocab = new Set(sizes.map((s) => s.visibilityValue));
-  if (!vocab.has(IN_STOCK) && !vocab.has(OUT_OF_STOCK)) {
+  if (!sizes.some((s) => known(s.visibilityValue))) {
     return {
       ok: false,
       kind: "parse",

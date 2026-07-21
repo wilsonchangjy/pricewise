@@ -1,0 +1,269 @@
+{
+ "summaries": [
+  {
+   "id": 207830219,
+   "variants": [
+    {
+     "id": 207830221,
+     "brandSize": "3XL",
+     "sku": "141241369"
+    },
+    {
+     "id": 207830222,
+     "brandSize": "XL",
+     "sku": "141241367"
+    },
+    {
+     "id": 207830223,
+     "brandSize": "XS",
+     "sku": "141241363"
+    },
+    {
+     "id": 207830224,
+     "brandSize": "S",
+     "sku": "141241364"
+    }
+   ]
+  }
+ ],
+ "stockprice": [
+  {
+   "productPrice": {
+    "current": {
+     "value": 94.99,
+     "text": "SGD$94.99",
+     "versionId": "REGP0000020001000000000000000",
+     "conversionId": "14825"
+    },
+    "previous": {
+     "value": 94.99,
+     "text": "SGD$94.99",
+     "versionId": "REGP0000020001000000000000000",
+     "conversionId": "14825"
+    },
+    "rrp": {
+     "value": null,
+     "text": null,
+     "versionId": "REGP0000020001000000000000000",
+     "conversionId": "14825"
+    },
+    "xrp": {
+     "value": 44.39,
+     "text": "£44.39",
+     "versionId": "REGP0000020001000000000000000",
+     "conversionId": "14826"
+    },
+    "currency": "SGD",
+    "isMarkedDown": false,
+    "isOutletPrice": false,
+    "startDateTime": "2026-05-01T07:00:59Z",
+    "previousEndDate": null,
+    "lowestPriceInLast30DaysValue": null,
+    "lowestPriceInLast30DaysText": null,
+    "lowestPriceInLast30DaysEndDate": null,
+    "lowestPriceInLast30DaysPercentage": null,
+    "discountPercentage": 0,
+    "context": null,
+    "additionalContexts": []
+   },
+   "variants": [
+    {
+     "id": 207830221,
+     "isInStock": true,
+     "isLowInStock": true,
+     "isRestockingSoon": false,
+     "stockLastUpdatedDate": "2026-07-20T16:16:08.866Z",
+     "warehouse": null,
+     "source": null,
+     "seller": null,
+     "showShippedByMessage": true,
+     "price": {
+      "current": {
+       "value": 94.99,
+       "text": "SGD$94.99",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "previous": {
+       "value": 94.99,
+       "text": "SGD$94.99",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "rrp": {
+       "value": null,
+       "text": null,
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "xrp": {
+       "value": 44.39,
+       "text": "£44.39",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14826"
+      },
+      "currency": "SGD",
+      "isMarkedDown": false,
+      "isOutletPrice": false,
+      "startDateTime": "2026-05-01T07:00:59Z",
+      "previousEndDate": null,
+      "lowestPriceInLast30DaysValue": null,
+      "lowestPriceInLast30DaysText": null,
+      "lowestPriceInLast30DaysEndDate": null,
+      "lowestPriceInLast30DaysPercentage": null,
+      "discountPercentage": 0,
+      "context": null,
+      "additionalContexts": []
+     }
+    },
+    {
+     "id": 207830222,
+     "isInStock": true,
+     "isLowInStock": false,
+     "isRestockingSoon": false,
+     "stockLastUpdatedDate": "2026-06-30T04:13:36.551Z",
+     "warehouse": null,
+     "source": null,
+     "seller": null,
+     "showShippedByMessage": true,
+     "price": {
+      "current": {
+       "value": 94.99,
+       "text": "SGD$94.99",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "previous": {
+       "value": 94.99,
+       "text": "SGD$94.99",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "rrp": {
+       "value": null,
+       "text": null,
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "xrp": {
+       "value": 44.39,
+       "text": "£44.39",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14826"
+      },
+      "currency": "SGD",
+      "isMarkedDown": false,
+      "isOutletPrice": false,
+      "startDateTime": "2026-05-01T07:00:59Z",
+      "previousEndDate": null,
+      "lowestPriceInLast30DaysValue": null,
+      "lowestPriceInLast30DaysText": null,
+      "lowestPriceInLast30DaysEndDate": null,
+      "lowestPriceInLast30DaysPercentage": null,
+      "discountPercentage": 0,
+      "context": null,
+      "additionalContexts": []
+     }
+    },
+    {
+     "id": 207830223,
+     "isInStock": true,
+     "isLowInStock": false,
+     "isRestockingSoon": false,
+     "stockLastUpdatedDate": "2026-06-30T01:30:00.075Z",
+     "warehouse": null,
+     "source": null,
+     "seller": null,
+     "showShippedByMessage": true,
+     "price": {
+      "current": {
+       "value": 94.99,
+       "text": "SGD$94.99",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "previous": {
+       "value": 94.99,
+       "text": "SGD$94.99",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "rrp": {
+       "value": null,
+       "text": null,
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "xrp": {
+       "value": 44.39,
+       "text": "£44.39",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14826"
+      },
+      "currency": "SGD",
+      "isMarkedDown": false,
+      "isOutletPrice": false,
+      "startDateTime": "2026-05-01T07:00:59Z",
+      "previousEndDate": null,
+      "lowestPriceInLast30DaysValue": null,
+      "lowestPriceInLast30DaysText": null,
+      "lowestPriceInLast30DaysEndDate": null,
+      "lowestPriceInLast30DaysPercentage": null,
+      "discountPercentage": 0,
+      "context": null,
+      "additionalContexts": []
+     }
+    },
+    {
+     "id": 207830224,
+     "isInStock": true,
+     "isLowInStock": false,
+     "isRestockingSoon": false,
+     "stockLastUpdatedDate": "2026-06-29T19:25:36.569Z",
+     "warehouse": null,
+     "source": null,
+     "seller": null,
+     "showShippedByMessage": true,
+     "price": {
+      "current": {
+       "value": 94.99,
+       "text": "SGD$94.99",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "previous": {
+       "value": 94.99,
+       "text": "SGD$94.99",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "rrp": {
+       "value": null,
+       "text": null,
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14825"
+      },
+      "xrp": {
+       "value": 44.39,
+       "text": "£44.39",
+       "versionId": "REGP0000020001000000000000000",
+       "conversionId": "14826"
+      },
+      "currency": "SGD",
+      "isMarkedDown": false,
+      "isOutletPrice": false,
+      "startDateTime": "2026-05-01T07:00:59Z",
+      "previousEndDate": null,
+      "lowestPriceInLast30DaysValue": null,
+      "lowestPriceInLast30DaysText": null,
+      "lowestPriceInLast30DaysEndDate": null,
+      "lowestPriceInLast30DaysPercentage": null,
+      "discountPercentage": 0,
+      "context": null,
+      "additionalContexts": []
+     }
+    }
+   ]
+  }
+ ]
+}

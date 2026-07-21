@@ -1,0 +1,42 @@
+{
+ "bundleProductSummaries": [
+  {
+   "detail": {
+    "colors": [
+     {
+      "sizes": [
+       {
+        "sku": 511319799,
+        "name": "XS",
+        "visibilityValue": "SHOW",
+        "price": "2999",
+        "oldPrice": null
+       },
+       {
+        "sku": 511319797,
+        "name": "S",
+        "visibilityValue": "SHOW",
+        "price": "2999",
+        "oldPrice": null
+       },
+       {
+        "sku": 511319798,
+        "name": "M",
+        "visibilityValue": "SHOW",
+        "price": "2999",
+        "oldPrice": null
+       },
+       {
+        "sku": 511319795,
+        "name": "L",
+        "visibilityValue": "SHOW",
+        "price": "2999",
+        "oldPrice": null
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}
