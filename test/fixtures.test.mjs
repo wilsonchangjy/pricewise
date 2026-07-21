@@ -282,3 +282,14 @@ test("mrporter: per-size stock matches the page, and the was-price is captured",
   );
   assert.equal(r.available, true, "one size left still counts as available");
 });
+
+test("jsonld: unquoted type attributes are still JSON-LD (eBay serves them)", () => {
+  // HTML lets you omit attribute quotes and eBay does. Requiring them meant
+  // silently finding no structured data at all on such a page.
+  const unquoted = '<script type=application/ld+json>'
+    + '{"@type":"Product","name":"X","offers":{"@type":"Offer","price":"9.99",'
+    + '"priceCurrency":"USD","availability":"https://schema.org/InStock"}}</script>';
+  const r = parseJsonLd(unquoted, { label: "x" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 9.99);
+});

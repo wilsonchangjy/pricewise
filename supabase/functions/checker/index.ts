@@ -168,20 +168,29 @@ async function checkProduct(product) {
     alerts += await alertSubscriber(sub, product, prevReading, reading, priceTrusted);
   }
 
+  // If this check just taught us the tier, the cadence changes NOW — scheduling
+  // off the stale value meant a 6h item waiting a full day for its second check.
+  // A URL-slug fallback title looks like "... Item .Aspx (farfetch.com)". Once a
+  // reading gives us the shop's own name for the thing, prefer it.
+  const slugFallback = /\([a-z0-9.-]+\)\s*$/i.test(product.title ?? "");
+  const betterTitle = reading.title && slugFallback ? reading.title.slice(0, 120) : undefined;
+
+  const learnedInterval = reading.tier ? TIER_INTERVAL_MIN[reading.tier] : undefined;
+  const effectiveInterval = learnedInterval ?? product.check_interval_minutes;
+
   await db.from("tracked_products").update({
     last_ok_at: new Date().toISOString(),
     consecutive_failures: 0,
     status: "active",
-    next_check_at: minutesFromNow(product.check_interval_minutes),
+    next_check_at: minutesFromNow(effectiveInterval),
+    ...(betterTitle ? { title: betterTitle } : {}),
     ...(reading.tier
       ? {
           unblocker_tier: reading.tier,
           unblocker_tier_at: new Date().toISOString(),
           // Cadence follows measured cost: a 1-credit check can afford 6h,
           // a 10-credit one cannot. Only widen/narrow what the tier implies.
-          ...(reading.tier !== product.unblocker_tier && TIER_INTERVAL_MIN[reading.tier]
-            ? { check_interval_minutes: TIER_INTERVAL_MIN[reading.tier] }
-            : {}),
+          ...(learnedInterval ? { check_interval_minutes: learnedInterval } : {}),
         }
       : {}),
   }).eq("id", product.id);

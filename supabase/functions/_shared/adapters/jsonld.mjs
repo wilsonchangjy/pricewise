@@ -48,9 +48,11 @@ const availOf = (offer) => {
  */
 export function parseJsonLd(html, item) {
   const checkedAt = new Date().toISOString();
+  // Attribute quoting is optional in HTML and eBay omits it, so accept
+  // type="application/ld+json", type='...' and bare type=application/ld+json.
   const blocks = [
     ...String(html).matchAll(
-      /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+      /<script[^>]*type=["']?application\/ld\+json["']?[^>]*>([\s\S]*?)<\/script>/gi,
     ),
   ].map((m) => m[1].trim());
 
@@ -79,7 +81,7 @@ function fromProduct(node, item, checkedAt) {
   const available = availOf(offer);
   const compareRaw = compareAtOf(offer);
   const compareAtPrice = compareRaw && price != null && compareRaw > price ? compareRaw : undefined;
-  return { ok: true, price, currency, compareAtPrice, available, variants: [{ id: "default", label: item.label, price, available }], checkedAt };
+  return { ok: true, price, currency, compareAtPrice, available, variants: [{ id: "default", label: item.label, price, available }], title: node.name ? String(node.name) : undefined, checkedAt };
 }
 
 function fromProductGroup(node, item, checkedAt) {
@@ -105,7 +107,7 @@ function fromProductGroup(node, item, checkedAt) {
   const groupOffer = offerOf(node) ?? offerOf(node.hasVariant.find((v) => offerOf(v)));
   const compareRaw = compareAtOf(groupOffer);
   const compareAtPrice = compareRaw && price != null && compareRaw > price ? compareRaw : undefined;
-  return { ok: true, price, currency, compareAtPrice, available, variants, checkedAt };
+  return { ok: true, price, currency, compareAtPrice, available, variants, title: node.name ? String(node.name) : undefined, checkedAt };
 }
 
 function isType(node, type) {

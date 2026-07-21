@@ -561,7 +561,14 @@ async function showHistory(user, chatId, ref, range) {
 /** The interval a NEW item gets: the user's default, floored, and never faster
  *  than daily for defended sites (those spend their own unblocker credits). */
 function preferredInterval(user, plan) {
-  if (plan.strategy === "unblocker") return DEFENDED_INTERVAL_MIN;
+  if (plan.strategy === "unblocker") {
+    // We already know what this shop is likely to cost (ADAPTER_TIER), so start
+    // at the cadence that cost earns. Assuming daily for everything quoted 30
+    // credits/month for a 1-credit shop that should run every 6h — and left it
+    // on a daily clock until the first check corrected it.
+    const tier = ADAPTER_TIER[plan.adapter] ?? "render";
+    return TIER_INTERVAL_MIN[tier] ?? DEFENDED_INTERVAL_MIN;
+  }
   const pref = Number(user.settings?.interval_minutes);
   if (!Number.isFinite(pref)) return plan.intervalMinutes;
   return Math.max(MIN_INTERVAL_MIN, pref);
