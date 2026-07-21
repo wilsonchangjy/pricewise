@@ -429,7 +429,7 @@ async function showProviders(chatId) {
     .map((p) =>
     `• ${p.label}${p.verified ? "" : " (untested by me)"}\n  ${p.freeNote}\n  ${p.signup}`);
   return sendMessage(BOT_TOKEN, chatId, [
-    "🔑 Bot-protected shops (Amazon, Zara, Massimo Dutti, ASOS…) need an unblocker service.",
+    "🔑 Bot-protected shops (Amazon, eBay, Zara, Massimo Dutti, ASOS…) need an unblocker service.",
     "Bring your own key — you stay in control of the spend:",
     "",
     ...lines,
