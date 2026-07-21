@@ -73,12 +73,13 @@ async function checkProduct(product) {
     return { ok: true, alerts: 0 };
   }
 
-  let unblockerKey, unblockerProvider;
+  let unblockerKey, unblockerProvider, funderId;
   if (product.fetch_strategy === "unblocker") {
     const { data } = await db.rpc("get_unblocker_for_product", { p_product_id: product.id });
     const row = Array.isArray(data) ? data[0] : data;
     unblockerKey = row?.api_key ?? undefined;
     unblockerProvider = row?.provider ?? undefined;
+    funderId = row?.user_id ?? undefined;
   }
 
   const item = {
@@ -139,6 +140,12 @@ async function checkProduct(product) {
     && reading.price !== prevReading.price;
   const verdict = await maybeVerify(product, reading, priceMoved);
   const priceTrusted = verdict?.status !== "disagree";
+
+  // The provider reported what this cost and what's left — record it rather than
+  // guessing which plan the funder is on.
+  if (funderId && Number.isFinite(reading.remaining)) {
+    await noteCredits(funderId, reading.remaining, subs);
+  }
 
   let alerts = 0;
   for (const sub of subs) {
@@ -337,6 +344,38 @@ function rowToReading(row) {
     variants: Array.isArray(row.variants) ? row.variants : [],
     checkedAt: row.checked_at,
   };
+}
+
+const LOW_CREDIT_WARN = 100;
+
+/**
+ * Persist the funder's observed balance, and tell them ONCE when it's nearly
+ * gone — a key that runs out mid-month otherwise looks like the bot breaking.
+ */
+async function noteCredits(userId, remaining, subs) {
+  const { data: existing } = await db.from("user_api_keys")
+    .select("credits_remaining, credits_low_notified_at").eq("user_id", userId).maybeSingle();
+
+  await db.from("user_api_keys")
+    .update({ credits_remaining: remaining, credits_seen_at: new Date().toISOString() })
+    .eq("user_id", userId);
+
+  if (remaining > LOW_CREDIT_WARN) {
+    // Recovered (their plan reset, or they topped up) — re-arm the warning.
+    if (existing?.credits_low_notified_at) {
+      await db.from("user_api_keys").update({ credits_low_notified_at: null }).eq("user_id", userId);
+    }
+    return;
+  }
+  if (existing?.credits_low_notified_at) return; // already told them
+
+  const chat = subs.find((x) => x.user_id === userId)?.users?.telegram_chat_id;
+  if (!chat) return;
+  await sendMessage(BOT_TOKEN, chat,
+    `🔋 Your unblocker key is down to ${remaining} credits.\n` +
+    "Bot-protected items will stop updating when it runs out — free stores keep going regardless.\n" +
+    "Most free plans reset monthly; /prefs shows your balance.");
+  await db.from("user_api_keys").update({ credits_low_notified_at: new Date().toISOString() }).eq("user_id", userId);
 }
 
 /** Exponential back-off; a persistently broken URL is parked, not retried forever. */

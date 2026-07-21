@@ -20,6 +20,6 @@ export async function readZara(item, ctx = {}) {
     return { ok: false, kind, status: res.status, message: `zara: ${res.message}`, checkedAt };
   }
   const out = parseJsonLd(res.html, item);
-  if (out.ok) out.tier = res.tier;
+  if (out.ok) { out.tier = res.tier; out.cost = res.cost; out.remaining = res.remaining; }
   return out;
 }

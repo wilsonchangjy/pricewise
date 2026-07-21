@@ -149,6 +149,6 @@ export async function readInditex(item, ctx = {}) {
     return { ok: false, kind, status: res.status, message: `inditex: ${res.message}`, checkedAt };
   }
   const out = parseInditex(res.html, item);
-  if (out.ok) out.tier = res.tier;
+  if (out.ok) { out.tier = res.tier; out.cost = res.cost; out.remaining = res.remaining; }
   return out;
 }

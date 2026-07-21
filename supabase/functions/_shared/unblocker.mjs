@@ -104,18 +104,23 @@ export async function fetchMaybeUnblocked(item, { apiKey, provider = DEFAULT_PRO
       message: `unblocker failed (${un.status || un.error}) at mode=${un.mode}`,
     };
   }
-  return { ok: true, html: un.body, via: `${provider}:${un.mode}`, tier: un.mode, status: un.status };
+  return { ok: true, html: un.body, via: `${provider}:${un.mode}`, tier: un.mode, status: un.status, cost: un.cost, remaining: un.remaining };
 }
 
 async function providerFetch(provider, url, apiKey, country, tierParams) {
   const started = Date.now();
+  const p = PROVIDERS[provider];
   try {
     const requestUrl = buildRequestUrl(provider, url, { apiKey, country, tier: tierParams });
     const res = await fetch(requestUrl);
     const body = await res.text();
-    // Every vendor reports cost on a different header; take whichever is present.
-    const cost = Number(res.headers.get("spb-cost") ?? res.headers.get("x-api-credits") ?? 0) || undefined;
-    return { ok: res.ok, status: res.status, body, cost, ms: Date.now() - started, mode: "" };
+    // Vendors report spend on their own headers. Reading the BALANCE (where it's
+    // offered) means a user's real quota is observable at no extra cost, instead
+    // of us assuming which plan they're on.
+    const num = (h) => (h ? Number(res.headers.get(h)) : NaN);
+    const cost = Number.isFinite(num(p?.costHeader)) ? num(p.costHeader) : undefined;
+    const remaining = Number.isFinite(num(p?.remainingHeader)) ? num(p.remainingHeader) : undefined;
+    return { ok: res.ok, status: res.status, body, cost, remaining, ms: Date.now() - started, mode: "" };
   } catch (e) {
     return { ok: false, status: 0, body: "", ms: Date.now() - started, mode: "", error: String(e?.message ?? e) };
   }

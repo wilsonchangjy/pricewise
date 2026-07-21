@@ -411,12 +411,15 @@ async function showProviders(chatId) {
     `• ${p.label}${p.verified ? "" : " (untested by me)"}\n  ${p.freeNote}\n  ${p.signup}`);
   return sendMessage(BOT_TOKEN, chatId, [
     "🔑 Bot-protected shops (Zara, Massimo Dutti, ASOS…) need an unblocker service.",
-    "Bring a free key from any of these — you stay in control of the spend:",
+    "Bring your own key — you stay in control of the spend:",
     "",
     ...lines,
     "",
     "Then: /setkey <provider> <key>",
     "I delete that message the moment I read it.",
+    "",
+    "Scrape.do is the one I've tested against every supported shop, and its free",
+    "credits renew monthly. Others work but I can't vouch for them the same way.",
   ].join("\n"));
 }
 
@@ -538,6 +541,8 @@ async function showPrefs(user, chatId) {
   const every = intervalWord(user.settings?.interval_minutes ?? FREE_INTERVAL_MIN);
   const { count } = await db.from("subscriptions")
     .select("id", { count: "exact", head: true }).eq("user_id", user.id);
+  const { data: keyRow } = await db.from("user_api_keys")
+    .select("provider, credits_remaining, credits_seen_at").eq("user_id", user.id).maybeSingle();
 
   const sizeLines = CATEGORIES.map(
     (c) => `• ${c}: ${sizes[c] ? sizes[c] : "not set"}`,
@@ -556,6 +561,12 @@ async function showPrefs(user, chatId) {
     `• fastest check is 3h — most shops don't change prices faster than that, and`,
     "  checking harder mostly earns blocks rather than earlier alerts",
     `• bot-protected shops (Zara, ASOS…) are checked once a day on your own key`,
+    ...(keyRow?.credits_remaining != null
+      ? ["", `🔋 ${PROVIDERS[keyRow.provider]?.label ?? keyRow.provider}: ${keyRow.credits_remaining} credits left`,
+         "   (as of your last bot-protected check — most free plans reset monthly)"]
+      : keyRow
+      ? ["", `🔑 ${PROVIDERS[keyRow.provider]?.label ?? keyRow.provider} key saved`]
+      : []),
   ].join("\n"));
 }
 

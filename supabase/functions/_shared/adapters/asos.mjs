@@ -106,5 +106,7 @@ export async function readAsos(item, ctx = {}) {
   } catch {
     return { ok: false, kind: "parse", message: "asos api did not return JSON (blocked or key stale?)", checkedAt };
   }
-  return parseAsos(summaries, stockprice, item);
+  const out = parseAsos(summaries, stockprice, item);
+  if (out.ok) { out.tier = sm.tier; out.cost = (sm.cost ?? 0) + (sp.cost ?? 0) || undefined; out.remaining = sp.remaining ?? sm.remaining; }
+  return out;
 }

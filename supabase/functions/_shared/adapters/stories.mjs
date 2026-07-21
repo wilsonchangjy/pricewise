@@ -66,6 +66,6 @@ export async function readStories(item, ctx = {}) {
     return { ok: false, kind, status: res.status, message: `stories: ${res.message}`, checkedAt };
   }
   const out = parseStories(res.html, item);
-  if (out.ok) out.tier = res.tier;
+  if (out.ok) { out.tier = res.tier; out.cost = res.cost; out.remaining = res.remaining; }
   return out;
 }

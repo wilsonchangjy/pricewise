@@ -33,6 +33,8 @@ export const PROVIDERS = {
     countryParam: "country_code",
     // ScrapingBee keys are long and alphanumeric.
     keyPattern: /^[A-Za-z0-9]{60,}$/, // observed: 80 alphanumeric
+    costHeader: "spb-cost",
+    remainingHeader: null, // ScrapingBee reports cost per call, not a balance
     tiers: [
       { mode: "plain", params: {} },
       { mode: "render", params: { render_js: "true" } },
@@ -49,11 +51,14 @@ export const PROVIDERS = {
     // I had taken a search-result snippet at face value instead of the pricing page.
     freeNote: "trial credits only — does not renew",
     verified: false,
+    hidden: true, // no free tier and untested by us: nothing to recommend
     base: "https://api.scraperapi.com/",
     keyParam: "api_key",
     urlParam: "url",
     countryParam: "country_code",
     keyPattern: /^[a-f0-9]{32}$/i,
+    costHeader: null,
+    remainingHeader: null,
     tiers: [
       { mode: "plain", params: {} },
       { mode: "render", params: { render: "true" } },
@@ -73,6 +78,10 @@ export const PROVIDERS = {
     urlParam: "url",
     countryParam: "geoCode",
     keyPattern: /^[A-Za-z0-9]{32,55}$/, // observed: 43 alphanumeric
+    // Every response carries the balance — so a user's real quota is observable
+    // for free, and we never have to guess what plan they're on.
+    costHeader: "scrape.do-request-cost",
+    remainingHeader: "scrape.do-remaining-credits",
     // Measured costs: plain 1, render 5, super 10.
     tiers: [
       { mode: "plain", params: {} },
@@ -128,8 +137,10 @@ export function buildRequestUrl(providerId, target, { apiKey, country, tier = {}
 }
 
 /** For /providers — what a user needs to choose one. */
-export function providerSummary() {
-  return Object.entries(PROVIDERS).map(([id, p]) => ({
-    id, label: p.label, signup: p.signup, freeNote: p.freeNote, verified: p.verified,
-  }));
+export function providerSummary({ includeHidden = false } = {}) {
+  return Object.entries(PROVIDERS)
+    .filter(([, p]) => includeHidden || !p.hidden)
+    .map(([id, p]) => ({
+      id, label: p.label, signup: p.signup, freeNote: p.freeNote, verified: p.verified,
+    }));
 }
