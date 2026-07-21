@@ -1,0 +1,36 @@
+{
+ "id": 7937717043269,
+ "title": "Autumn Underwire Bikini Top - Sweet Bloom",
+ "price": 14000,
+ "available": true,
+ "variants": [
+  {
+   "id": 44564022198341,
+   "title": "Sweet Bloom / XS",
+   "price": 14000,
+   "compare_at_price": 19500,
+   "available": false
+  },
+  {
+   "id": 44564022231109,
+   "title": "Sweet Bloom / S",
+   "price": 14000,
+   "compare_at_price": 19500,
+   "available": true
+  },
+  {
+   "id": 44564022263877,
+   "title": "Sweet Bloom / M",
+   "price": 14000,
+   "compare_at_price": 19500,
+   "available": true
+  },
+  {
+   "id": 44564022296645,
+   "title": "Sweet Bloom / L",
+   "price": 14000,
+   "compare_at_price": 19500,
+   "available": true
+  }
+ ]
+}

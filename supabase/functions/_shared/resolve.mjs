@@ -47,7 +47,17 @@ export function resolveSelector(url, adapter) {
 
   switch (adapter) {
     // ── nothing to resolve: these adapters read the page/handle directly ──────
-    case "shopify":
+    case "shopify": {
+      // Shopify puts the chosen size in ?variant=. Ignoring it meant tracking
+      // "any size of this product" — so a link to a sold-out XS on a product
+      // with five other sizes in stock would read as available, and the restock
+      // alert for XS would never fire. That's the whole promise, missed.
+      const variantId = q.get("variant");
+      return variantId
+        ? { ok: true, selector: {}, variantId, watching: "the exact size in your link" }
+        : { ok: true, selector: {}, watching: "every size on the page" };
+    }
+
     case "wix":
     case "jsonld":
     case "zara":

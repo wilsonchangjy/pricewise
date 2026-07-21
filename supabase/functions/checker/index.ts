@@ -210,6 +210,16 @@ async function alertSubscriber(sub, product, prevReading, reading, priceTrusted 
     sub.pending_size = null;
   }
 
+  // A variant chosen from a URL arrives without a human label; fill it in from
+  // the first reading so alerts say "Sweet Bloom / XS" and not just the product.
+  if (sub.variant_id && !sub.variant_label) {
+    const hit = (reading.variants ?? []).find((v) => String(v.id) === String(sub.variant_id));
+    if (hit?.label) {
+      await db.from("subscriptions").update({ variant_label: hit.label }).eq("id", sub.id);
+      sub.variant_label = hit.label;
+    }
+  }
+
   const item = {
     id: String(product.id),
     label: sub.variant_label ? `${product.title} — ${sub.variant_label}` : product.title,

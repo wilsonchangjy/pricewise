@@ -1,0 +1,270 @@
+{
+ "result": {
+  "l2s": [
+   {
+    "color": {
+     "code": "COL00",
+     "displayCode": "00"
+    },
+    "communicationCode": "486149-00-005-000",
+    "flags": {
+     "priceFlags": [
+      {
+       "id": 12,
+       "code": "discount",
+       "name": "Sale",
+       "type": "price_flag",
+       "effectiveTime": {
+        "start": 1782756000,
+        "end": 0
+       },
+       "detail": ""
+      }
+     ],
+     "productFlags": []
+    },
+    "pld": {
+     "code": "PTB000",
+     "displayCode": "000"
+    },
+    "size": {
+     "code": "SMA005",
+     "displayCode": "005"
+    },
+    "l2Id": "09352480",
+    "alterations": {},
+    "sales": true,
+    "salesType": "NORMAL",
+    "searchInStoresAvailable": true,
+    "isReturnable": true
+   },
+   {
+    "color": {
+     "code": "COL00",
+     "displayCode": "00"
+    },
+    "communicationCode": "486149-00-002-000",
+    "flags": {
+     "priceFlags": [
+      {
+       "id": 12,
+       "code": "discount",
+       "name": "Sale",
+       "type": "price_flag",
+       "effectiveTime": {
+        "start": 1782756000,
+        "end": 0
+       },
+       "detail": ""
+      }
+     ],
+     "productFlags": []
+    },
+    "pld": {
+     "code": "PTB000",
+     "displayCode": "000"
+    },
+    "size": {
+     "code": "SMA002",
+     "displayCode": "002"
+    },
+    "l2Id": "09352477",
+    "alterations": {},
+    "sales": true,
+    "salesType": "NORMAL",
+    "searchInStoresAvailable": true,
+    "isReturnable": true
+   },
+   {
+    "color": {
+     "code": "COL00",
+     "displayCode": "00"
+    },
+    "communicationCode": "486149-00-003-000",
+    "flags": {
+     "priceFlags": [
+      {
+       "id": 12,
+       "code": "discount",
+       "name": "Sale",
+       "type": "price_flag",
+       "effectiveTime": {
+        "start": 1782756000,
+        "end": 0
+       },
+       "detail": ""
+      }
+     ],
+     "productFlags": []
+    },
+    "pld": {
+     "code": "PTB000",
+     "displayCode": "000"
+    },
+    "size": {
+     "code": "SMA003",
+     "displayCode": "003"
+    },
+    "l2Id": "09352478",
+    "alterations": {},
+    "sales": true,
+    "salesType": "NORMAL",
+    "searchInStoresAvailable": true,
+    "isReturnable": true
+   },
+   {
+    "color": {
+     "code": "COL00",
+     "displayCode": "00"
+    },
+    "communicationCode": "486149-00-004-000",
+    "flags": {
+     "priceFlags": [
+      {
+       "id": 12,
+       "code": "discount",
+       "name": "Sale",
+       "type": "price_flag",
+       "effectiveTime": {
+        "start": 1782756000,
+        "end": 0
+       },
+       "detail": ""
+      }
+     ],
+     "productFlags": []
+    },
+    "pld": {
+     "code": "PTB000",
+     "displayCode": "000"
+    },
+    "size": {
+     "code": "SMA004",
+     "displayCode": "004"
+    },
+    "l2Id": "09352479",
+    "alterations": {},
+    "sales": true,
+    "salesType": "NORMAL",
+    "searchInStoresAvailable": true,
+    "isReturnable": true
+   }
+  ],
+  "stocks": {
+   "09352477": {
+    "statusCode": "IN_STOCK",
+    "quantity": 11,
+    "transitStatus": "NO_TRANSIT",
+    "backInStock": false,
+    "disableSizeChip": false,
+    "transitLocalized": "",
+    "statusLocalized": "In stock",
+    "isDCStock": true
+   },
+   "09352478": {
+    "statusCode": "IN_STOCK",
+    "quantity": 11,
+    "transitStatus": "NO_TRANSIT",
+    "backInStock": false,
+    "disableSizeChip": false,
+    "transitLocalized": "",
+    "statusLocalized": "In stock",
+    "isDCStock": false
+   },
+   "09352479": {
+    "statusCode": "IN_STOCK",
+    "quantity": 11,
+    "transitStatus": "NO_TRANSIT",
+    "backInStock": false,
+    "disableSizeChip": false,
+    "transitLocalized": "",
+    "statusLocalized": "In stock",
+    "isDCStock": false
+   },
+   "09352480": {
+    "statusCode": "STOCK_OUT",
+    "quantity": 0,
+    "transitStatus": "NO_TRANSIT",
+    "backInStock": true,
+    "disableSizeChip": true,
+    "transitLocalized": "",
+    "statusLocalized": "Out of stock",
+    "isDCStock": false
+   }
+  },
+  "prices": {
+   "09352477": {
+    "base": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 9.9
+    },
+    "promo": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 9.9
+    },
+    "isDualPrice": false,
+    "taxPolicy": "INCLUSIVE"
+   },
+   "09352478": {
+    "base": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 9.9
+    },
+    "promo": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 9.9
+    },
+    "isDualPrice": false,
+    "taxPolicy": "INCLUSIVE"
+   },
+   "09352479": {
+    "base": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 9.9
+    },
+    "promo": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 9.9
+    },
+    "isDualPrice": false,
+    "taxPolicy": "INCLUSIVE"
+   },
+   "09352480": {
+    "base": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 9.9
+    },
+    "promo": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 9.9
+    },
+    "isDualPrice": false,
+    "taxPolicy": "INCLUSIVE"
+   }
+  }
+ }
+}

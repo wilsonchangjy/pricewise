@@ -17,6 +17,7 @@ import { parseMango } from "../supabase/functions/_shared/adapters/mango.mjs";
 import { parseCos } from "../supabase/functions/_shared/adapters/cos.mjs";
 import { parseJsonLd } from "../supabase/functions/_shared/adapters/jsonld.mjs";
 import { parseWix } from "../supabase/functions/_shared/adapters/wix.mjs";
+import { normalizeUrl } from "../supabase/functions/_shared/urlguard.mjs";
 
 const fx = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
 const json = (f) => JSON.parse(fx(f));
@@ -90,7 +91,8 @@ test("every fixture is small enough to read in a diff", () => {
                    "mango-stock.json", "cos-item.json", "jsonld-product.html",
                    "wix-product.html", "amazon-sg-product.html", "amazon-sg-unavailable.html",
                    "bershka-itxrest.json", "stradivarius-itxrest.json", "inditex-massimodutti.html",
-                   "stories-product.html", "zara-productgroup.html", "asos-product.json"]) {
+                   "stories-product.html", "zara-productgroup.html", "asos-product.json",
+                   "uniqlo-soldout.json", "shopify-soldout.json"]) {
     assert.ok(fx(f).length < budget, `${f} is ${fx(f).length}b — trim it further`);
   }
 });
@@ -162,4 +164,51 @@ test("asos: a wrong-currency response is refused, not mislabelled", () => {
   const r = parseAsos(a.summaries, a.stockprice, { label: "ASOS", currency: "USD" });
   assert.equal(r.ok, false);
   assert.match(r.message, /wrong store/);
+});
+
+// ── sold-out states, captured 2026-07-21 from links Wilson sent ──────────────
+test("uniqlo: a sold-out size reports unavailable while siblings are in stock", () => {
+  const r = parseUniqlo(json("uniqlo-soldout.json"), {
+    label: "Uniqlo", variantSelector: { colorDisplayCode: "00", sizeDisplayCode: "005" },
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.available, false, "the SELECTED size is out, whatever the others do");
+  assert.ok(r.variants.some((v) => v.available), "and other sizes are still in stock");
+});
+
+test("uniqlo: STOCK_OUT is understood (not just OUT_OF_STOCK)", () => {
+  // The live response used STOCK_OUT — a vocabulary we hadn't seen before today.
+  const r = parseUniqlo(json("uniqlo-soldout.json"), { label: "Uniqlo" });
+  const target = r.variants.find((v) => v.sizeCode === "005");
+  assert.equal(target.state, "out_of_stock");
+  assert.equal(target.available, false);
+});
+
+// THE BUG THIS CAUGHT: a link to a sold-out XS on a product whose other sizes are
+// in stock. Tracking the product reports "available"; tracking the linked variant
+// reports the truth. Ignoring ?variant= silently broke the entire promise.
+test("shopify: the ?variant= in a link is the size the user meant", () => {
+  const fixture = json("shopify-soldout.json");
+  const whole = parseShopifyJs(fixture, { label: "Frankies", currency: "USD" });
+  const chosen = parseShopifyJs(fixture, { label: "Frankies", currency: "USD", variantId: "44564022198341" });
+
+  assert.equal(whole.available, true, "some size is available");
+  assert.equal(chosen.available, false, "but the size they linked is NOT");
+  assert.notEqual(whole.available, chosen.available, "which is exactly why the variant must be honoured");
+});
+
+test("shopify: resolveSelector extracts the variant from a real shared link", async () => {
+  const { resolveSelector } = await import("../supabase/functions/_shared/resolve.mjs");
+  const shared = "https://frankiesbikinis.com/products/autumn-underwire-bikini-top-sweet-bloom?_pos=1&_fid=201cc98df&_ss=c&variant=44564022198341";
+  const r = resolveSelector(shared, "shopify");
+  assert.equal(r.ok, true);
+  assert.equal(r.variantId, "44564022198341");
+  assert.match(r.watching, /exact size/);
+});
+
+test("shopify: search-context junk is stripped, but variant is kept", () => {
+  const a = normalizeUrl("https://frankiesbikinis.com/products/x?_pos=1&_fid=abc&_ss=c&variant=123");
+  const b = normalizeUrl("https://frankiesbikinis.com/products/x?variant=123&_pos=9");
+  assert.equal(a, b, "the same item found two ways is one product");
+  assert.match(a, /variant=123/, "variant names a size — never strip it");
 });

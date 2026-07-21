@@ -18,6 +18,9 @@ const TRACKING_PARAMS = [
   /^utm_/i,
   /^(fbclid|gclid|gclsrc|dclid|msclkid|yclid|twclid|ttclid|igshid|epik|li_fat_id)$/i,
   /^(mc_cid|mc_eid|srsltid|_gl|cmpid|s_kwcid|irclickid|rtid)$/i,
+  // Shopify search context — two people finding the same item different ways
+  // would otherwise create two product rows. `variant` is NOT junk: it names a size.
+  /^(_pos|_fid|_ss|_sid|pr_prod_strat|pr_rec_id|pr_ref_pid|pr_seq)$/i,
 ];
 
 /**

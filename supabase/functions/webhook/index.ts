@@ -285,7 +285,9 @@ async function addItem(user, chatId, rawUrl) {
     user_id: user.id,
     product_id: product.id,
     interval_minutes: preferredInterval(user, plan),
-    pending_size: pendingSize ?? null,
+    // A variant named in the URL beats a saved default — they picked it deliberately.
+    variant_id: res.variantId ?? null,
+    pending_size: res.variantId ? null : (pendingSize ?? null),
   });
   if (error) throw error;
 
