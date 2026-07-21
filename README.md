@@ -65,11 +65,20 @@ You ──paste a link──▶ Telegram bot ──▶ Supabase (your list)
 | Command | What it does |
 |---|---|
 | paste a URL / `/add <url>` | start tracking an item |
-| `/list` | show your tracked items |
-| `/remove <n>` | stop tracking one |
+| `/list` | show your tracked items — tap one to change it |
+| `/size <n> <your size>` | watch one size instead of the whole product |
+| `/every <n> <3h\|6h\|12h\|1d>` | how often to check that item |
 | `/setprice <n> <price>` | alert only at/below a price |
+| `/history <n>` | price history since tracking began |
 | `/pause <n>` · `/resume <n>` | mute / unmute |
-| `/setkey <key>` | add your ScrapingBee key for bot-protected stores |
+| `/remove <n>` | stop tracking one |
+| `/setsize` · `/setevery` | defaults applied to new items |
+| `/prefs` | your defaults, limits and credit balance |
+| `/setkey <key>` · `/providers` | add an unblocker key for bot-protected stores |
+
+Small price moves are ignored on purpose: a drop has to be at least **5% and 2
+currency units** before it's worth interrupting you. A `/setprice` target always
+alerts, however small the step — you asked for that number specifically.
 
 ## Self-hosting
 
@@ -80,11 +89,15 @@ webhook at it.
 
 ## Contributing
 
-New store adapters are very welcome — each is a small, self-contained module that
-turns a product URL into `{ price, per-size availability }`. See
-`supabase/functions/_shared/adapters/` for examples, and `test/` for how they're
-verified. Bug reports and store requests (the bot logs unsupported sites) help
-prioritise what to add next.
+**You don't need to write code to help.** The slow part of supporting a shop is
+working out where it hides its per-size stock — browser work, not programming.
+Open a [store request](../../issues/new?template=store-request.yml) and the form
+walks you through it.
+
+Writing an adapter is welcome too: each is a small, self-contained module turning
+a product URL into `{ price, per-size availability }`. See
+**[CONTRIBUTING.md](CONTRIBUTING.md)** for the contract, a copyable template, and
+a list of the traps that have already bitten us.
 
 ## License
 

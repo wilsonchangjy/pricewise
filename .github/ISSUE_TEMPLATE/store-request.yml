@@ -1,0 +1,120 @@
+name: "🏬 Store request (with homework)"
+description: "Ask for a shop to be supported — and, if you can, do the digging that makes it quick to add."
+title: "Store: "
+labels: ["store request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **You do not need to write any code to be enormously helpful here.**
+
+        Writing an adapter is usually about thirty lines. The slow part is finding
+        where a shop hides its per-size stock, and proving the numbers we read are
+        the same ones a shopper sees. That part is browser work, and anyone who can
+        open DevTools can do it.
+
+        Fill in what you can. Even just the first two boxes is a useful request.
+
+  - type: input
+    id: store
+    attributes:
+      label: Which shop?
+      placeholder: "example.com"
+    validations:
+      required: true
+
+  - type: input
+    id: product_url
+    attributes:
+      label: A product link
+      description: >
+        Ideally one with **at least one size sold out**. Pages where everything is
+        available look identical whether our parser works or is quietly wrong, so
+        they are the least useful kind to test against.
+      placeholder: "https://example.com/products/thing"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: sizes
+    attributes:
+      label: Does the page show individual sizes?
+      options:
+        - "Yes — sizes with some greyed out / marked sold out"
+        - "Yes — sizes, but sold-out ones are hidden entirely"
+        - "No — it's one-size or a single buy button"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ### The homework (optional, and the most valuable part)
+
+        Open the product page, then DevTools (`F12` / `⌘⌥I`).
+
+        **1. Is the data already in the page?** View source (`Ctrl-U` / `⌘⌥U`) and
+        search for one of your size labels, e.g. `"M"` or `"UK 9"`. Also search for
+        `application/ld+json` — many shops ship a ready-made product block.
+
+        **2. If not, it arrives separately.** Network tab → reload → filter by the
+        price (e.g. `64.00`). Whatever request contains it is the one we want.
+
+  - type: textarea
+    id: request
+    attributes:
+      label: The request that carries price / size data
+      description: "Its URL — or just say “it's in the page HTML”."
+      render: text
+
+  - type: textarea
+    id: response
+    attributes:
+      label: The response body
+      description: >
+        Paste it, or the relevant slice if it's huge. **Please remove anything
+        personal first** — cookies, tokens, order history, your address. If you had
+        to be logged in to see it, say so.
+      render: json
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: A screenshot of the size selector
+      description: >
+        Drag an image in. This is the ground truth we check the parser against: we
+        need to see which sizes *a human* is told are unavailable. Without it we can
+        only confirm that our code runs, not that it is right.
+
+  - type: input
+    id: market
+    attributes:
+      label: Country / currency you're seeing
+      description: "Prices and stock differ by market, so a reading is only meaningful with this."
+      placeholder: "Singapore, SGD"
+
+  - type: dropdown
+    id: blocked
+    attributes:
+      label: Does the shop seem to block bots?
+      description: >
+        A quick check: open the product URL in a private window with JavaScript
+        disabled, or run `curl -s <url> | head -c 500`. If you get a challenge page,
+        a CAPTCHA, or an empty shell, it's defended — still supportable, but it will
+        need an unblocker key.
+      options:
+        - "Loads fine without JavaScript"
+        - "Needs JavaScript, but no challenge"
+        - "Shows a CAPTCHA / 'checking your browser' page"
+        - "Not sure"
+
+  - type: textarea
+    id: anything_else
+    attributes:
+      label: Anything odd you noticed?
+      description: >
+        Colour variants on separate URLs? A query parameter that changes the price?
+        Sold-out sizes that vanish rather than grey out? These quirks are usually
+        where the bugs come from — see the "known traps" section in CONTRIBUTING.md.

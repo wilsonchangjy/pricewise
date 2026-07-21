@@ -7,8 +7,9 @@
 //  in -> out -> "sold out"                            lastAlertStatus = oos
 //  out -> in -> "back in stock"                       lastAlertStatus = in_stock
 //  sizes low -> "running low" (best-effort)           lastAlertStatus = low
-//  price<=target -> "target hit"                      lastAlertPrice  = price
-//  price<lastAlertPrice -> "price drop"               lastAlertPrice  = price
+//  price<=target -> "target hit" (ALWAYS, no floor)   lastAlertPrice  = price
+//  price<lastAlertPrice by >=5% and >=2 -> "price drop"  lastAlertPrice = price
+//  price<lastAlertPrice by less        -> (no alert)  lastAlertPrice UNCHANGED
 //  price>lastAlertPrice -> (raise baseline, no alert) lastAlertPrice  = price
 //
 // evaluate() is PURE: same inputs -> same events. No I/O. Heavily tested.
@@ -24,6 +25,29 @@ const LOW_STOCK = "low_stock";
 // (JPY 10 is tiny); fine for SGD/USD, revisit when we track e.g. JPY items.
 const PRICE_UP_PCT = 10; // >= +10% ...
 const PRICE_UP_ABS = 10; // ... OR >= +10 currency units, whichever hits first
+
+// A price DROP has to be worth acting on. EUR 65.00 -> EUR 64.00 is a real drop
+// and useless news: it fired an alert reading "(2% off)" for one euro.
+//
+// BOTH conditions must hold, i.e. the bar is max(5%, 2 units):
+//   - the percentage carries cheap items, where 5% is pennies;
+//   - the absolute floor carries expensive ones, where 5% is already plenty.
+// A flat 5-unit floor was the obvious choice and is wrong: it would mute a
+// 15.00 -> 12.00 tee (20% off) because 3.00 < 5.00, which is exactly the kind
+// of deal someone tracks an item for.
+const PRICE_DROP_PCT = 5;
+const PRICE_DROP_ABS = 2;
+
+/**
+ * Is this drop worth a message? Compared against the last price we ALERTED at,
+ * never the last price we saw — see the call site for why that distinction is
+ * what makes a slow bleed still reach the user.
+ */
+export function isDropWorthAlerting(from, to) {
+  if (!(from > 0) || !(to < from)) return false;
+  const abs = from - to;
+  return (abs / from) * 100 >= PRICE_DROP_PCT && abs >= PRICE_DROP_ABS;
+}
 
 /** @param {number|undefined} n @param {string} cur */
 export function fmt(n, cur) {
@@ -140,13 +164,20 @@ export function evaluate(item, prev, reading) {
       });
       patch.lastAlertPrice = price;
     } else if (price < lastAlertPrice) {
-      const off = Math.round((1 - price / lastAlertPrice) * 100);
-      events.push({
-        kind: "price_drop",
-        level: "alert",
-        text: `💸 PRICE DROP: ${item.label}\n${fmt(lastAlertPrice, reading.currency)} -> ${fmt(price, reading.currency)} (${off}% off)\n${item.url}`,
-      });
-      patch.lastAlertPrice = price;
+      if (isDropWorthAlerting(lastAlertPrice, price)) {
+        const off = Math.round((1 - price / lastAlertPrice) * 100);
+        events.push({
+          kind: "price_drop",
+          level: "alert",
+          text: `💸 PRICE DROP: ${item.label}\n${fmt(lastAlertPrice, reading.currency)} -> ${fmt(price, reading.currency)} (${off}% off)\n${item.url}`,
+        });
+        patch.lastAlertPrice = price;
+      }
+      // Too small to shout about — and CRUCIALLY we leave lastAlertPrice alone.
+      // Banking the new number would reset the yardstick every time, so 65 -> 64
+      // -> 63 -> 62 would slide all the way down in silent one-unit steps. Held
+      // at 65, the same slide alerts the moment it reaches 61.75, and the
+      // message honestly reads "65.00 -> 61.75" rather than "62.00 -> 61.75".
     } else if (price > lastAlertPrice) {
       // Price went up. Only shout if the jump is SIGNIFICANT (a "buy before it
       // climbs further" signal); small bumps just raise the baseline silently.

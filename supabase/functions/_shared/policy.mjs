@@ -2,8 +2,10 @@
 //
 // FREE tier (direct adapters + generic JSON-LD fallback) = tracked immediately,
 // no key, checked on the normal cadence. DEFENDED (unblocker) = opt-in with the
-// user's OWN ScrapingBee key, capped at MAX_DEFENDED items, checked DAILY to
-// protect their credits. Unsupported = logged (demand signal) + a friendly no.
+// user's OWN unblocker key (any provider in providers.mjs), capped at
+// MAX_DEFENDED items, and checked at a cadence set by what each store COSTS —
+// 6h for a 1-credit store, daily for a 10-credit one — to protect their credits.
+// Unsupported = logged (demand signal) + a friendly no.
 //
 // planAdd() is pure (inject detectAdapter + the user's context) so it's testable
 // and portable (Node + Deno).
@@ -70,7 +72,7 @@ export async function planAdd(url, ctx) {
         action: "need_key",
         adapter: det.adapter,
         message:
-          "That brand is bot-protected, so it needs an unblocker. Add your own ScrapingBee key with /setkey to track it " +
+          "That brand is bot-protected, so it needs an unblocker. Add your own key with /setkey to track it — /providers shows the options " +
           `(up to ${MAX_DEFENDED} such items — how often depends on what that shop costs to check) — or send me a supported store instead.`,
       };
     }
@@ -78,7 +80,7 @@ export async function planAdd(url, ctx) {
       return {
         action: "cap_reached",
         adapter: det.adapter,
-        message: `You're at the limit of ${MAX_DEFENDED} defended items (they use your ScrapingBee credits). Remove one with /remove to add this.`,
+        message: `You're at the limit of ${MAX_DEFENDED} defended items (they spend your own unblocker credits). Remove one with /remove to add this.`,
       };
     }
     return {
