@@ -92,7 +92,8 @@ test("every fixture is small enough to read in a diff", () => {
                    "wix-product.html", "amazon-sg-product.html", "amazon-sg-unavailable.html",
                    "bershka-itxrest.json", "stradivarius-itxrest.json", "inditex-massimodutti.html",
                    "stories-product.html", "zara-productgroup.html", "asos-product.json",
-                   "uniqlo-soldout.json", "shopify-soldout.json"]) {
+                   "uniqlo-soldout.json", "shopify-soldout.json",
+                   "farfetch-productgroup.html", "ssense-product.html"]) {
     assert.ok(fx(f).length < budget, `${f} is ${fx(f).length}b — trim it further`);
   }
 });
@@ -211,4 +212,22 @@ test("shopify: search-context junk is stripped, but variant is kept", () => {
   const b = normalizeUrl("https://frankiesbikinis.com/products/x?variant=123&_pos=9");
   assert.equal(a, b, "the same item found two ways is one product");
   assert.match(a, /variant=123/, "variant names a size — never strip it");
+});
+
+// ── stores probed for feasibility 2026-07-21, both readable at 1 credit ──────
+test("farfetch: per-size stock AND price, via priceSpecification[]", () => {
+  // Farfetch ships price inside an ARRAY of UnitPriceSpecification. Handling only
+  // the object form meant reading a page with per-size stock and no price at all.
+  const r = parseJsonLd(fx("farfetch-productgroup.html"), { label: "Farfetch" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 429);
+  assert.equal(r.currency, "SGD", "the SG site quotes SGD — currency must follow the page");
+  assert.deepEqual(r.variants.map((v) => v.label), ["S", "M", "L", "XL"]);
+});
+
+test("ssense: product-level only — no per-size stock available", () => {
+  const r = parseJsonLd(fx("ssense-product.html"), { label: "SSENSE" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 154);
+  assert.equal(r.variants.length, 1, "SSENSE ships no hasVariant, so no per-size wedge here");
 });

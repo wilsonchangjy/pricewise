@@ -12,10 +12,18 @@
 import { httpGet } from "../fetcher.mjs";
 
 const offerOf = (x) => (Array.isArray(x?.offers) ? x.offers[0] : x?.offers);
+
+// priceSpecification comes as an object on some sites and an ARRAY on others
+// (Farfetch ships UnitPriceSpecification[]). Missing the array form meant
+// reading a page with per-size stock and no price at all.
+const specOf = (offer) =>
+  Array.isArray(offer?.priceSpecification) ? offer.priceSpecification[0] : offer?.priceSpecification;
+
 const priceOf = (offer) => {
-  const raw = offer?.price ?? offer?.priceSpecification?.price;
+  const raw = offer?.price ?? specOf(offer)?.price;
   return raw != null ? Number(raw) : undefined;
 };
+const currencyOf = (offer) => offer?.priceCurrency ?? specOf(offer)?.priceCurrency;
 const availOf = (offer) => {
   const a = String(offer?.availability ?? "").toLowerCase();
   return a.includes("instock") || a.includes("limited");
@@ -55,7 +63,7 @@ function fromProduct(node, item, checkedAt) {
   const offer = offerOf(node);
   if (!offer) return { ok: false, kind: "parse", message: "JSON-LD Product has no offers", checkedAt };
   const price = priceOf(offer);
-  const currency = offer.priceCurrency ?? offer.priceSpecification?.priceCurrency ?? item.currency ?? "";
+  const currency = currencyOf(offer) ?? item.currency ?? "";
   const available = availOf(offer);
   return { ok: true, price, currency, available, variants: [{ id: "default", label: item.label, price, available }], checkedAt };
 }
@@ -75,7 +83,7 @@ function fromProductGroup(node, item, checkedAt) {
     });
   if (!variants.length) return { ok: false, kind: "parse", message: "JSON-LD ProductGroup has no usable variants", checkedAt };
 
-  const currency = offerOf(node.hasVariant.find((v) => offerOf(v)))?.priceCurrency ?? item.currency ?? "";
+  const currency = currencyOf(offerOf(node.hasVariant.find((v) => offerOf(v)))) ?? item.currency ?? "";
   const chosen = item.variantId ? variants.find((v) => v.id === String(item.variantId)) : undefined;
   const price = chosen?.price ?? variants.find((v) => v.price != null)?.price;
   const available = chosen ? chosen.available : variants.some((v) => v.available);

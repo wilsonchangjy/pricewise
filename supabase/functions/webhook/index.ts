@@ -13,6 +13,7 @@ import { sendMessage, deleteMessage, editMessage, answerCallback } from "../_sha
 import { labelFromUrl } from "../_shared/label.mjs";
 import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
 import { cleanUrl } from "../_shared/urlguard.mjs";
+import { expandUrl, isShortLink } from "../_shared/expand.mjs";
 import { formatHistory } from "../_shared/history.mjs";
 import { CATEGORIES, detectCategory, normalizeCategory } from "../_shared/category.mjs";
 import { matchVariant } from "../_shared/variants.mjs";
@@ -195,8 +196,20 @@ async function upsertUser(telegramUserId, chatId) {
 async function addItem(user, chatId, rawUrl) {
   // Strangers choose what we fetch, so the link is checked BEFORE any request:
   // public http(s) only, and campaign junk stripped so shared items dedupe.
-  const clean = cleanUrl(rawUrl);
+  let clean = cleanUrl(rawUrl);
   if (!clean.ok) return reply(chatId, `${clean.reason}. Send me a normal product link and I'll take it from there.`);
+
+  // Share buttons hand out short links, and that's how people actually send
+  // products around. Follow them to the real URL before anything tries to
+  // recognise the store — otherwise "amzn.asia" reads as an unsupported site.
+  if (isShortLink(clean.url)) {
+    const expanded = await expandUrl(clean.url);
+    if (!expanded.ok) {
+      return reply(chatId, `That share link didn't lead anywhere I could read (${expanded.reason}). Try opening it and copying the full product link.`);
+    }
+    const recleaned = cleanUrl(expanded.url);
+    if (recleaned.ok) clean = recleaned;
+  }
   const url = clean.url;
 
   // One person shouldn't be able to eat the whole check budget. Counts the WHOLE

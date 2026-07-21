@@ -34,9 +34,23 @@ function canonicalAmazon(u) {
   return `${u.origin}/dp/${asin[1].toUpperCase()}`;
 }
 
+/**
+ * Lazada share links carry ~1KB of per-share tracking (laz_token, pvid, a
+ * timestamped priceCompare blob), so every share of one product would be a
+ * different URL and therefore a different tracked row. The path already
+ * identifies item and sku: /products/pdp-i{item}-s{sku}.html
+ */
+function canonicalLazada(u) {
+  return /\/products\/pdp-i\d+/.test(u.pathname) ? `${u.origin}${u.pathname}` : null;
+}
+
 /** @param {string} raw @returns {string} */
 export function normalizeUrl(raw) {
   const u = new URL(raw);
+  if (/(^|\.)lazada\.[a-z.]{2,6}$/i.test(u.hostname)) {
+    const canon = canonicalLazada(u);
+    if (canon) return canon;
+  }
   if (/(^|\.)amazon\.[a-z.]{2,6}$/i.test(u.hostname)) {
     const canon = canonicalAmazon(u);
     if (canon) return canon;
