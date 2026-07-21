@@ -48,8 +48,10 @@ export function resolveSelector(url, adapter) {
   switch (adapter) {
     // ── nothing to resolve: these adapters read the page/handle directly ──────
     case "farfetch":
-      // Sizes arrive as JSON-LD hasVariant, so the URL needs nothing extra.
-      return { ok: true, selector: {}, watching: "every size on the page" };
+    case "mrporter":
+      // Sizes arrive as JSON-LD hasVariant, and each COLOURWAY is its own URL,
+      // so the link already pins the colour and the page supplies the sizes.
+      return { ok: true, selector: {}, watching: "every size in this colour" };
 
     case "shopify": {
       // Shopify puts the chosen size in ?variant=. Ignoring it meant tracking

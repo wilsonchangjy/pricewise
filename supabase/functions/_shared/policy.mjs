@@ -23,7 +23,7 @@ export const TIER_COST = { plain: 1, render: 5, premium: 5, super: 10, super_ren
 export const ADAPTER_TIER = {
   bershka: "plain", stradivarius: "plain", asos: "plain", amazon: "plain", farfetch: "plain",
   stories: "plain", // measured 2026-07-21: answers a plain request, not render
-  inditex: "render", zara: "super",
+  inditex: "render", zara: "super", mrporter: "super",
 };
 
 // Cadence by cost, not by the blunt "is it defended". A 1-credit check every 6h

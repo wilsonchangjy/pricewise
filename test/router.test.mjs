@@ -77,3 +77,13 @@ test("farfetch routes by host and is bot-protected", async () => {
   assert.equal(r.via, "host", "no network probe needed");
   assert.equal(strategyFor("farfetch"), "unblocker", "a datacentre IP needs a key for it");
 });
+
+test("mrporter routes by host, bot-protected, priced at the super tier", async () => {
+  const { ADAPTER_TIER, monthlyCredits, TIER_INTERVAL_MIN } = await import("../supabase/functions/_shared/policy.mjs");
+  const r = await detectAdapter("https://www.mrporter.com/en-sg/mens/product/stone-island/clothing/blousons/waxed-tela-blouson-jacket/46376663163021693");
+  assert.equal(r.adapter, "mrporter");
+  assert.equal(strategyFor("mrporter"), "unblocker");
+  // Only the residential tier gets through: 10cr a check, so 300/month at daily.
+  assert.equal(ADAPTER_TIER.mrporter, "super");
+  assert.equal(monthlyCredits("super", TIER_INTERVAL_MIN.super), 300);
+});

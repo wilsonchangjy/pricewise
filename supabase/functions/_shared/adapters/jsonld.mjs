@@ -16,8 +16,20 @@ const offerOf = (x) => (Array.isArray(x?.offers) ? x.offers[0] : x?.offers);
 // priceSpecification comes as an object on some sites and an ARRAY on others
 // (Farfetch ships UnitPriceSpecification[]). Missing the array form meant
 // reading a page with per-size stock and no price at all.
-const specOf = (offer) =>
-  Array.isArray(offer?.priceSpecification) ? offer.priceSpecification[0] : offer?.priceSpecification;
+const specs = (offer) => {
+  const ps = offer?.priceSpecification;
+  return Array.isArray(ps) ? ps : ps ? [ps] : [];
+};
+const specOf = (offer) => specs(offer).find((x) => !/Strikethrough|ListPrice/i.test(x?.priceType ?? "")) ?? specs(offer)[0];
+
+// The was-price rides along as a second spec entry tagged StrikethroughPrice —
+// that's the "£975, 30% off" a shopper actually sees, and reading only the first
+// entry threw the discount away.
+const compareAtOf = (offer) => {
+  const struck = specs(offer).find((x) => /Strikethrough|ListPrice/i.test(x?.priceType ?? ""));
+  const raw = struck?.price ?? offer?.highPrice;
+  return raw != null ? Number(raw) : undefined;
+};
 
 const priceOf = (offer) => {
   const raw = offer?.price ?? specOf(offer)?.price;
@@ -65,7 +77,9 @@ function fromProduct(node, item, checkedAt) {
   const price = priceOf(offer);
   const currency = currencyOf(offer) ?? item.currency ?? "";
   const available = availOf(offer);
-  return { ok: true, price, currency, available, variants: [{ id: "default", label: item.label, price, available }], checkedAt };
+  const compareRaw = compareAtOf(offer);
+  const compareAtPrice = compareRaw && price != null && compareRaw > price ? compareRaw : undefined;
+  return { ok: true, price, currency, compareAtPrice, available, variants: [{ id: "default", label: item.label, price, available }], checkedAt };
 }
 
 function fromProductGroup(node, item, checkedAt) {
@@ -87,7 +101,11 @@ function fromProductGroup(node, item, checkedAt) {
   const chosen = item.variantId ? variants.find((v) => v.id === String(item.variantId)) : undefined;
   const price = chosen?.price ?? variants.find((v) => v.price != null)?.price;
   const available = chosen ? chosen.available : variants.some((v) => v.available);
-  return { ok: true, price, currency, available, variants, checkedAt };
+  // A ProductGroup usually carries the was-price on the group offer.
+  const groupOffer = offerOf(node) ?? offerOf(node.hasVariant.find((v) => offerOf(v)));
+  const compareRaw = compareAtOf(groupOffer);
+  const compareAtPrice = compareRaw && price != null && compareRaw > price ? compareRaw : undefined;
+  return { ok: true, price, currency, compareAtPrice, available, variants, checkedAt };
 }
 
 function isType(node, type) {

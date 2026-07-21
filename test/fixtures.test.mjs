@@ -96,7 +96,8 @@ test("every fixture is small enough to read in a diff", () => {
                    "stories-product.html", "zara-productgroup.html", "asos-product.json",
                    "uniqlo-soldout.json", "shopify-soldout.json",
                    "farfetch-productgroup.html", "ssense-product.html",
-                   "amazon-book.html", "amazon-clippers.html", "wix-multivariant.html"]) {
+                   "amazon-book.html", "amazon-clippers.html", "wix-multivariant.html",
+                   "mrporter-productgroup.html"]) {
     assert.ok(fx(f).length < budget, `${f} is ${fx(f).length}b — trim it further`);
   }
 });
@@ -265,4 +266,19 @@ test("farfetch: the wired adapter reuses the tested JSON-LD parser", async () =>
   assert.equal(r.price, 429);
   assert.equal(r.currency, "SGD");
   assert.deepEqual(r.variants.map((v) => v.label), ["S", "M", "L", "XL"]);
+});
+
+// Verified against Wilson's screenshot: £683 (was £975, 30% off), and of
+// S/M/L/XL/XXL only M was available — the size grid matched exactly.
+test("mrporter: per-size stock matches the page, and the was-price is captured", () => {
+  const r = parseJsonLd(fx("mrporter-productgroup.html"), { label: "Stone Island jacket" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 683);
+  assert.equal(r.currency, "GBP", "GBP is what's charged; the page shows an approx SGD alongside");
+  assert.equal(r.compareAtPrice, 975, "the strikethrough price rides in a second priceSpecification entry");
+  assert.deepEqual(
+    r.variants.map((v) => `${v.label}:${v.available ? "IN" : "out"}`),
+    ["S:out", "M:IN", "L:out", "XL:out", "XXL:out"],
+  );
+  assert.equal(r.available, true, "one size left still counts as available");
 });
