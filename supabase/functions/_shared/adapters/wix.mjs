@@ -5,12 +5,16 @@
 //   ..."catalog":{"product":{ ..., isInStock, price, comparePrice, currency,
 //                             inventory:{status}, isManageProductItems, productItems }}
 //
-// Wix sites are lightly defended (direct fetch = 200, FREE). This reads the
-// PRODUCT-LEVEL price + availability, which fits single-product Wix items (many
-// indie/studio stores). NOTE: products with MANAGED VARIANTS (isManageProductItems
-// true) would need per-variant parsing of productItems[] — a future extension.
+// Wix sites are lightly defended (direct fetch = 200, FREE).
+//
+// PER-SIZE: managed-variant products carry productItems[] (one per size, each
+// with its own price and inventory) plus options[] mapping selection ids to
+// labels. Reading only the product level said "available" for a top whose L/XL
+// and 2/3X were both at quantity zero — the wedge, missed, on exactly the indie
+// stores Wix is popular with.
 
 import { httpGet } from "../fetcher.mjs";
+import { STATE, isBuyable } from "../stock.mjs";
 
 // Balanced-brace extract from the "{" at `start` (string-aware).
 function balancedObject(s, start) {
@@ -41,21 +45,78 @@ export function parseWix(html, item) {
   let p;
   try { p = JSON.parse(raw); } catch { return { ok: false, kind: "parse", message: "wix: catalog.product was not valid JSON", checkedAt }; }
 
-  const available = p.isInStock === true || p.inventory?.status === "in_stock";
   const price = p.discountedPrice != null ? Number(p.discountedPrice) : p.price != null ? Number(p.price) : undefined;
   const compareRaw = p.comparePrice != null ? Number(p.comparePrice) : undefined;
   const compareAtPrice = compareRaw && price != null && compareRaw > price ? compareRaw : undefined;
   const currency = p.currency ?? item.currency ?? "";
 
+  const variants = perSizeVariants(p);
+  if (variants.length) {
+    const chosen = item.variantId ? variants.find((v) => v.id === String(item.variantId)) : undefined;
+    return {
+      ok: true,
+      price: chosen?.price ?? price ?? variants.find((v) => v.price != null)?.price,
+      currency,
+      compareAtPrice,
+      available: chosen ? chosen.available : variants.some((v) => v.available),
+      variants,
+      checkedAt,
+    };
+  }
+
+  // Single-variant product: the shop sells one thing, so the product IS the variant.
+  //
+  // Wix can report inventory.status "in_stock" while quantity is 0 and isInStock
+  // is false — trusting status alone told us a sold-out item was available.
+  // Quantity wins where present; isInStock breaks the tie.
+  const qty = p.inventory?.quantity;
+  const available = typeof qty === "number"
+    ? qty > 0
+    : p.isInStock === true || p.inventory?.status === "in_stock";
   return {
     ok: true,
     price,
     currency,
     compareAtPrice,
     available,
-    variants: [{ id: "default", label: String(p.name ?? item.label), price, available }],
+    variants: [{ id: "default", label: String(p.name ?? item.label), price, available, state: available ? STATE.IN_STOCK : STATE.OUT_OF_STOCK }],
     checkedAt,
   };
+}
+
+/**
+ * One entry per size, from productItems[] + the options[] label map.
+ * Returns [] when the product has no managed variants.
+ */
+function perSizeVariants(p) {
+  const items = Array.isArray(p.productItems) ? p.productItems : [];
+  if (!items.length) return [];
+
+  // selection id -> human label ("XS", "S/M"), flattened across every option group
+  const labels = new Map();
+  for (const opt of p.options ?? []) {
+    for (const sel of opt.selections ?? []) labels.set(sel.id, sel.value ?? sel.description ?? String(sel.id));
+  }
+
+  return items.map((it) => {
+    const label = (it.optionsSelections ?? []).map((id) => labels.get(id) ?? String(id)).join(" / ");
+    const qty = it.inventory?.quantity;
+    const status = it.inventory?.status;
+    // Quantity is authoritative when the shop tracks it; otherwise fall back to
+    // the status. Hidden items are never buyable whatever the numbers say.
+    const inStock = it.isVisible !== false
+      && (typeof qty === "number" ? qty > 0 : status !== "out_of_stock");
+    const state = inStock ? STATE.IN_STOCK : STATE.OUT_OF_STOCK;
+    return {
+      id: String(it.id),
+      label: label || String(it.sku ?? it.id),
+      price: it.price != null ? Number(it.price) : undefined,
+      compareAtPrice: it.comparePrice > 0 && it.comparePrice > it.price ? Number(it.comparePrice) : undefined,
+      available: isBuyable(state),
+      state,
+      sizeCode: label || undefined,
+    };
+  });
 }
 
 /** @param {import("../types.mjs").Item} item */

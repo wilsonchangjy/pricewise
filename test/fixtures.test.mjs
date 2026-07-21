@@ -82,7 +82,9 @@ test("wix: product state survives extraction from a 2MB page", () => {
   assert.equal(r.ok, true);
   assert.equal(r.price, 5000);
   assert.equal(r.currency, "PHP", "currency comes from the shop, not our locale");
-  assert.equal(r.available, true);
+  // This page reports inventory.status "in_stock" alongside quantity 0 and
+  // isInStock false. Reading status alone called a sold-out item available.
+  assert.equal(r.available, false, "quantity 0 means sold out, whatever status claims");
 });
 
 test("every fixture is small enough to read in a diff", () => {
@@ -93,7 +95,8 @@ test("every fixture is small enough to read in a diff", () => {
                    "bershka-itxrest.json", "stradivarius-itxrest.json", "inditex-massimodutti.html",
                    "stories-product.html", "zara-productgroup.html", "asos-product.json",
                    "uniqlo-soldout.json", "shopify-soldout.json",
-                   "farfetch-productgroup.html", "ssense-product.html"]) {
+                   "farfetch-productgroup.html", "ssense-product.html",
+                   "amazon-book.html", "amazon-clippers.html", "wix-multivariant.html"]) {
     assert.ok(fx(f).length < budget, `${f} is ${fx(f).length}b — trim it further`);
   }
 });
@@ -230,4 +233,23 @@ test("ssense: product-level only — no per-size stock available", () => {
   assert.equal(r.ok, true);
   assert.equal(r.price, 154);
   assert.equal(r.variants.length, 1, "SSENSE ships no hasVariant, so no per-size wedge here");
+});
+
+test("wix: per-size stock from a managed-variant product", () => {
+  // munimuni's own catalogue, captured 2026-07-21: XS and S/M in stock,
+  // L/XL and 2/3X at quantity zero. Reading only the product level said
+  // "available" and lost every one of those distinctions.
+  const r = parseWix(fx("wix-multivariant.html"), { label: "Yakap Top" });
+  assert.equal(r.ok, true);
+  assert.equal(r.currency, "PHP");
+  assert.deepEqual(r.variants.map((v) => v.label), ["XS", "S/M", "L/XL", "2/3X"]);
+  assert.deepEqual(r.variants.map((v) => v.available), [true, true, false, false]);
+  assert.equal(r.available, true, "some size is buyable, so the product is");
+});
+
+test("wix: tracking a sold-out size reports IT, not the product", () => {
+  const soldOut = parseWix(fx("wix-multivariant.html"), { label: "Yakap Top" })
+    .variants.find((v) => v.label === "L/XL");
+  const r = parseWix(fx("wix-multivariant.html"), { label: "Yakap Top", variantId: soldOut.id });
+  assert.equal(r.available, false, "the whole point: my size is gone even though the product isn't");
 });

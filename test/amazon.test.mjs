@@ -98,3 +98,25 @@ test("a non-English Amazon link is refused at /add rather than tracked", async (
   assert.match(r.reason, /English/);
   assert.equal(resolveSelector("https://www.amazon.sg/dp/B0BZJ512J2", "amazon").ok, true);
 });
+
+// ── other categories: our parser was built from a T-SHIRT ────────────────────
+// Wilson's question was whether one item per store is enough. For HTML-parsed
+// stores it isn't — so these pin two categories that look nothing like apparel.
+const BOOK = readFileSync(new URL("./fixtures/amazon-book.html", import.meta.url), "utf8");
+const CLIPPERS = readFileSync(new URL("./fixtures/amazon-clippers.html", import.meta.url), "utf8");
+
+test("amazon: a BOOK parses (different category, same markup contract)", () => {
+  const r = parseAmazon(BOOK, { url: "https://www.amazon.sg/dp/0393356256" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 28.72);
+  assert.equal(r.currency, "SGD");
+  assert.equal(r.variants[0].state, "low_stock", "Amazon told us stock was running down");
+  assert.match(r.variants[0].label, /Odyssey/);
+});
+
+test("amazon: a homeware item parses", () => {
+  const r = parseAmazon(CLIPPERS, { url: "https://www.amazon.sg/dp/B00B17E8GI" });
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 11.04, "matches what a vendor's structured Amazon API returned independently");
+  assert.equal(r.variants[0].available, true);
+});
