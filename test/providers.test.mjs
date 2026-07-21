@@ -57,11 +57,18 @@ test("an unknown provider throws rather than building a bad request", () => {
   assert.throws(() => buildRequestUrl("nope", "https://x.test", { apiKey: "K" }), /unknown unblocker provider/);
 });
 
-test("only ScrapingBee is marked verified — the others are documented, not tested", () => {
-  const s = providerSummary();
-  assert.equal(s.find((p) => p.id === "scrapingbee").verified, true);
-  assert.equal(s.find((p) => p.id === "scraperapi").verified, false);
-  assert.ok(s.every((p) => p.freeNote && p.signup));
+test("the listed providers are ones we have actually tested", () => {
+  const listed = providerSummary();
+  assert.ok(listed.every((p) => p.verified), "never recommend a provider we haven't run");
+  assert.ok(listed.every((p) => p.freeNote && p.signup));
+  assert.ok(listed.some((p) => p.id === "scrapedo"), "Scrape.do: measured against every defended brand");
+  assert.ok(listed.some((p) => p.id === "scrapingbee"), "ScrapingBee: the original spike ran on it");
+});
+
+test("ScraperAPI is hidden — untested AND no renewing free tier", () => {
+  assert.equal(providerSummary().find((p) => p.id === "scraperapi"), undefined);
+  // but the code path survives for self-hosters who already hold a key
+  assert.ok(providerSummary({ includeHidden: true }).some((p) => p.id === "scraperapi"));
 });
 
 // ── measured against Scrape.do on 2026-07-21 ────────────────────────────────

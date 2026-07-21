@@ -418,8 +418,8 @@ async function showProviders(chatId) {
     "Then: /setkey <provider> <key>",
     "I delete that message the moment I read it.",
     "",
-    "Scrape.do is the one I've tested against every supported shop, and its free",
-    "credits renew monthly. Others work but I can't vouch for them the same way.",
+    "Both are tested. Scrape.do is the one to pick if you're starting fresh —",
+    "its free credits renew every month, where ScrapingBee's are a one-off trial.",
   ].join("\n"));
 }
 

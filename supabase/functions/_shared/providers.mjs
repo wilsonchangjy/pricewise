@@ -72,7 +72,8 @@ export const PROVIDERS = {
     label: "Scrape.do",
     signup: "https://scrape.do",
     freeNote: "1,000 credits every month — renews (confirmed on their pricing page)",
-    verified: false,
+    // Verified 2026-07-21 against every defended brand we support.
+    verified: true,
     base: "https://api.scrape.do/",
     keyParam: "token",
     urlParam: "url",
