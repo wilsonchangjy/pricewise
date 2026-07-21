@@ -1,0 +1,426 @@
+{
+ "result": {
+  "l2s": [
+   {
+    "color": {
+     "code": "COL69",
+     "displayCode": "69"
+    },
+    "communicationCode": "485737-69-032-000",
+    "flags": {
+     "priceFlags": [],
+     "productFlags": []
+    },
+    "pld": {
+     "code": "PTB000",
+     "displayCode": "000"
+    },
+    "size": {
+     "code": "INS032",
+     "displayCode": "032"
+    },
+    "l2Id": "09097714",
+    "alterations": {
+     "groupId": 1,
+     "position": "Inseam Length",
+     "title": "Inseam Length",
+     "required": false,
+     "unit": "cm",
+     "methods": [
+      {
+       "id": 9,
+       "name": "Visible",
+       "plu": "9920000000701",
+       "price": {
+        "currency": {
+         "code": "SGD",
+         "symbol": "$"
+        },
+        "value": 0
+       },
+       "lengths": [
+        74,
+        73,
+        72,
+        71,
+        70,
+        69,
+        68,
+        67,
+        66,
+        65,
+        64,
+        63,
+        62,
+        61,
+        60,
+        59,
+        58,
+        57,
+        56,
+        55,
+        54,
+        53,
+        52,
+        51,
+        50,
+        49,
+        48,
+        47,
+        46,
+        45,
+        44,
+        43,
+        42,
+        41,
+        40
+       ]
+      }
+     ]
+    },
+    "sales": true,
+    "salesType": "NORMAL",
+    "searchInStoresAvailable": true,
+    "isReturnable": true
+   },
+   {
+    "color": {
+     "code": "COL69",
+     "displayCode": "69"
+    },
+    "communicationCode": "485737-69-027-000",
+    "flags": {
+     "priceFlags": [],
+     "productFlags": []
+    },
+    "pld": {
+     "code": "PTB000",
+     "displayCode": "000"
+    },
+    "size": {
+     "code": "INS027",
+     "displayCode": "027"
+    },
+    "l2Id": "09097694",
+    "alterations": {
+     "groupId": 1,
+     "position": "Inseam Length",
+     "title": "Inseam Length",
+     "required": false,
+     "unit": "cm",
+     "methods": [
+      {
+       "id": 9,
+       "name": "Visible",
+       "plu": "9920000000701",
+       "price": {
+        "currency": {
+         "code": "SGD",
+         "symbol": "$"
+        },
+        "value": 0
+       },
+       "lengths": [
+        74,
+        73,
+        72,
+        71,
+        70,
+        69,
+        68,
+        67,
+        66,
+        65,
+        64,
+        63,
+        62,
+        61,
+        60,
+        59,
+        58,
+        57,
+        56,
+        55,
+        54,
+        53,
+        52,
+        51,
+        50,
+        49,
+        48,
+        47,
+        46,
+        45,
+        44,
+        43,
+        42,
+        41,
+        40
+       ]
+      }
+     ]
+    },
+    "sales": true,
+    "salesType": "NORMAL",
+    "searchInStoresAvailable": true,
+    "isReturnable": true
+   },
+   {
+    "color": {
+     "code": "COL69",
+     "displayCode": "69"
+    },
+    "communicationCode": "485737-69-028-000",
+    "flags": {
+     "priceFlags": [],
+     "productFlags": []
+    },
+    "pld": {
+     "code": "PTB000",
+     "displayCode": "000"
+    },
+    "size": {
+     "code": "INS028",
+     "displayCode": "028"
+    },
+    "l2Id": "09097698",
+    "alterations": {
+     "groupId": 1,
+     "position": "Inseam Length",
+     "title": "Inseam Length",
+     "required": false,
+     "unit": "cm",
+     "methods": [
+      {
+       "id": 9,
+       "name": "Visible",
+       "plu": "9920000000701",
+       "price": {
+        "currency": {
+         "code": "SGD",
+         "symbol": "$"
+        },
+        "value": 0
+       },
+       "lengths": [
+        74,
+        73,
+        72,
+        71,
+        70,
+        69,
+        68,
+        67,
+        66,
+        65,
+        64,
+        63,
+        62,
+        61,
+        60,
+        59,
+        58,
+        57,
+        56,
+        55,
+        54,
+        53,
+        52,
+        51,
+        50,
+        49,
+        48,
+        47,
+        46,
+        45,
+        44,
+        43,
+        42,
+        41,
+        40
+       ]
+      }
+     ]
+    },
+    "sales": true,
+    "salesType": "NORMAL",
+    "searchInStoresAvailable": true,
+    "isReturnable": true
+   },
+   {
+    "color": {
+     "code": "COL69",
+     "displayCode": "69"
+    },
+    "communicationCode": "485737-69-029-000",
+    "flags": {
+     "priceFlags": [],
+     "productFlags": []
+    },
+    "pld": {
+     "code": "PTB000",
+     "displayCode": "000"
+    },
+    "size": {
+     "code": "INS029",
+     "displayCode": "029"
+    },
+    "l2Id": "09097702",
+    "alterations": {
+     "groupId": 1,
+     "position": "Inseam Length",
+     "title": "Inseam Length",
+     "required": false,
+     "unit": "cm",
+     "methods": [
+      {
+       "id": 9,
+       "name": "Visible",
+       "plu": "9920000000701",
+       "price": {
+        "currency": {
+         "code": "SGD",
+         "symbol": "$"
+        },
+        "value": 0
+       },
+       "lengths": [
+        74,
+        73,
+        72,
+        71,
+        70,
+        69,
+        68,
+        67,
+        66,
+        65,
+        64,
+        63,
+        62,
+        61,
+        60,
+        59,
+        58,
+        57,
+        56,
+        55,
+        54,
+        53,
+        52,
+        51,
+        50,
+        49,
+        48,
+        47,
+        46,
+        45,
+        44,
+        43,
+        42,
+        41,
+        40
+       ]
+      }
+     ]
+    },
+    "sales": true,
+    "salesType": "NORMAL",
+    "searchInStoresAvailable": true,
+    "isReturnable": true
+   }
+  ],
+  "stocks": {
+   "09097694": {
+    "statusCode": "IN_STOCK",
+    "quantity": 11,
+    "transitStatus": "NO_TRANSIT",
+    "backInStock": false,
+    "disableSizeChip": false,
+    "transitLocalized": "",
+    "statusLocalized": "In stock",
+    "isDCStock": false
+   },
+   "09097698": {
+    "statusCode": "IN_STOCK",
+    "quantity": 4,
+    "transitStatus": "NO_TRANSIT",
+    "backInStock": false,
+    "disableSizeChip": false,
+    "transitLocalized": "",
+    "statusLocalized": "In stock",
+    "isDCStock": false
+   },
+   "09097702": {
+    "statusCode": "IN_STOCK",
+    "quantity": 4,
+    "transitStatus": "NO_TRANSIT",
+    "backInStock": false,
+    "disableSizeChip": false,
+    "transitLocalized": "",
+    "statusLocalized": "In stock",
+    "isDCStock": false
+   },
+   "09097714": {
+    "statusCode": "IN_STOCK",
+    "quantity": 4,
+    "transitStatus": "NO_TRANSIT",
+    "backInStock": false,
+    "disableSizeChip": false,
+    "transitLocalized": "",
+    "statusLocalized": "In stock",
+    "isDCStock": false
+   }
+  },
+  "prices": {
+   "09097694": {
+    "base": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 59.9
+    },
+    "promo": null,
+    "isDualPrice": false,
+    "taxPolicy": "INCLUSIVE"
+   },
+   "09097698": {
+    "base": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 59.9
+    },
+    "promo": null,
+    "isDualPrice": false,
+    "taxPolicy": "INCLUSIVE"
+   },
+   "09097702": {
+    "base": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 59.9
+    },
+    "promo": null,
+    "isDualPrice": false,
+    "taxPolicy": "INCLUSIVE"
+   },
+   "09097714": {
+    "base": {
+     "currency": {
+      "code": "SGD",
+      "symbol": "$"
+     },
+     "value": 59.9
+    },
+    "promo": null,
+    "isDualPrice": false,
+    "taxPolicy": "INCLUSIVE"
+   }
+  }
+ }
+}

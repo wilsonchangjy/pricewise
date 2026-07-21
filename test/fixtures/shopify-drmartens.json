@@ -1,0 +1,37 @@
+{
+ "id": 8712448868587,
+ "title": "Vintage 1461 Quilon Leather Oxford Shoes",
+ "price": 29599,
+ "compare_at_price": 36900,
+ "available": true,
+ "variants": [
+  {
+   "id": 45729581498603,
+   "title": "UK3/EU36",
+   "price": 29599,
+   "compare_at_price": 36900,
+   "available": true
+  },
+  {
+   "id": 45729581531371,
+   "title": "UK4/EU37",
+   "price": 29599,
+   "compare_at_price": 36900,
+   "available": true
+  },
+  {
+   "id": 45729581564139,
+   "title": "UK5/EU38",
+   "price": 29599,
+   "compare_at_price": 36900,
+   "available": false
+  },
+  {
+   "id": 45729581596907,
+   "title": "UK6/EU39",
+   "price": 29599,
+   "compare_at_price": 36900,
+   "available": true
+  }
+ ]
+}

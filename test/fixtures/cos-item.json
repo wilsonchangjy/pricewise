@@ -1,0 +1,62 @@
+{
+ "code": 1000,
+ "data": {
+  "itemName": "SEERSUCKER RESORT SHIRT",
+  "skus": [
+   {
+    "skuCode": "1326785001002",
+    "qty": 0,
+    "price": "125.00",
+    "markingPrice": "125.00",
+    "skuProperties": [
+     {
+      "propertyName": "color",
+      "valueName": "BLACK",
+      "frontCode": "1326785001"
+     },
+     {
+      "propertyName": "size",
+      "valueName": "S",
+      "frontCode": null
+     }
+    ]
+   },
+   {
+    "skuCode": "1326785001003",
+    "qty": 0,
+    "price": "125.00",
+    "markingPrice": "125.00",
+    "skuProperties": [
+     {
+      "propertyName": "color",
+      "valueName": "BLACK",
+      "frontCode": "1326785001"
+     },
+     {
+      "propertyName": "size",
+      "valueName": "M",
+      "frontCode": null
+     }
+    ]
+   },
+   {
+    "skuCode": "1326785001004",
+    "qty": 0,
+    "price": "125.00",
+    "markingPrice": "125.00",
+    "skuProperties": [
+     {
+      "propertyName": "color",
+      "valueName": "BLACK",
+      "frontCode": "1326785001"
+     },
+     {
+      "propertyName": "size",
+      "valueName": "L",
+      "frontCode": null
+     }
+    ]
+   }
+  ]
+ }
+}

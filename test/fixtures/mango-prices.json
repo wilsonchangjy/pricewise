@@ -1,0 +1,11 @@
+{
+ "07": {
+  "price": 65.9,
+  "previousPrices": {
+   "originalShop": 99.9
+  },
+  "discountRate": 34,
+  "starPrice": false,
+  "type": "SALE1"
+ }
+}

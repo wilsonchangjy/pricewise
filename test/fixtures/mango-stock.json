@@ -1,0 +1,46 @@
+{
+ "colors": {
+  "07": {
+   "sizes": {
+    "19": {
+     "available": true,
+     "lastUnits": true,
+     "warehouses": [
+      "001"
+     ]
+    },
+    "20": {
+     "available": true,
+     "lastUnits": true,
+     "warehouses": [
+      "001"
+     ]
+    },
+    "21": {
+     "available": true,
+     "lastUnits": true,
+     "warehouses": [
+      "001"
+     ]
+    },
+    "22": {
+     "available": true,
+     "lastUnits": true,
+     "warehouses": [
+      "001"
+     ]
+    },
+    "23": {
+     "available": true,
+     "lastUnits": true,
+     "warehouses": [
+      "001"
+     ]
+    },
+    "24": {
+     "available": false
+    }
+   }
+  }
+ }
+}
