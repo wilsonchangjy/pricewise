@@ -87,7 +87,7 @@ export async function planAdd(url, ctx) {
       strategy: "unblocker",
       intervalMinutes: DEFENDED_INTERVAL_MIN,
       hints: det.hints,
-      message: "Tracking this (defended — uses your key, checked daily).",
+      message: "Tracking this (bot-protected — uses your key).",
     };
   }
 

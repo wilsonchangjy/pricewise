@@ -66,7 +66,8 @@ const HELP = [
   "",
   "/list — your tracked items",
   "/size <n> <your size> — watch one size instead of the whole product",
-  "/every <n> <3h|6h|12h|1d> — how often to check (default 6h)",
+  "/every <n> <3h|6h|12h|1d> — how often to check (6h by default; bot-protected",
+  "   items follow what they cost)",
   "/history <n> [1m|3m|6m|1y] — price history since I started watching",
   "",
   "/prefs — your defaults and limits",
@@ -492,8 +493,13 @@ async function setEvery(user, chatId, ref, value) {
   if (!sub) return;
   const p = sub.tracked_products;
 
-  if (p.fetch_strategy === "unblocker" && minutes < DEFENDED_INTERVAL_MIN) {
-    return reply(chatId, "Bot-protected items stay on a once-a-day check — they spend your own ScrapingBee credits, and a faster cadence would burn through them.");
+  const floorMin = defendedFloor(p);
+  if (minutes < floorMin) {
+    return reply(chatId, [
+      `This one costs enough per check that I keep it to every ${intervalWord(floorMin)}.`,
+      "It spends your own unblocker credits, and checking harder mostly burns them",
+      "rather than finding things sooner.",
+    ].join("\n"));
   }
 
   await db.from("subscriptions").update({ interval_minutes: minutes }).eq("id", sub.id);
@@ -508,6 +514,16 @@ async function setEvery(user, chatId, ref, value) {
     .eq("id", p.id);
 
   return reply(chatId, `⏱️ ${p.title} — checking every ${value} now.`);
+}
+
+/**
+ * The fastest cadence a bot-protected item is allowed, derived from what it
+ * actually costs to check. Free stores have no floor beyond the global one.
+ */
+function defendedFloor(product) {
+  if (product.fetch_strategy !== "unblocker") return MIN_INTERVAL_MIN;
+  const tier = product.unblocker_tier ?? ADAPTER_TIER[product.adapter] ?? "render";
+  return TIER_INTERVAL_MIN[tier] ?? DEFENDED_INTERVAL_MIN;
 }
 
 /** Shared "which item did you mean?" lookup for the numbered commands. */
@@ -774,8 +790,10 @@ async function applyEvery(sub, chatId, messageId, cqId, value) {
   const p = sub.tracked_products;
   if (!minutes) return answerCallback(BOT_TOKEN, cqId);
 
-  if (p.fetch_strategy === "unblocker" && minutes < DEFENDED_INTERVAL_MIN) {
-    return answerCallback(BOT_TOKEN, cqId, "Bot-protected shops stay on a daily check — it's your own credits.", true);
+  const floorMin = defendedFloor(p);
+  if (minutes < floorMin) {
+    return answerCallback(BOT_TOKEN, cqId,
+      `This shop costs enough that I keep it to every ${intervalWord(floorMin)} — it's your own credits.`, true);
   }
   await db.from("subscriptions").update({ interval_minutes: minutes }).eq("id", sub.id);
   sub.interval_minutes = minutes;

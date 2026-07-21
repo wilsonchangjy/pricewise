@@ -22,9 +22,11 @@ just "is it in stock somewhere."
 Wix stores**, and any site with standard product data. That's a huge slice of
 fashion retail.
 
-**Bot-protected stores** (Zara, Massimo Dutti, Oysho, ASOS, Bershka,
+**Bot-protected stores** (Amazon, Zara, Massimo Dutti, Oysho, ASOS, Bershka,
 Stradivarius, & Other Stories) need an unblocker, so they're opt-in: bring your
-own key with `/setkey` (up to 5 items, checked daily, on your own credits).
+own key with `/setkey` — up to 5 such items, on your own credits. How often each
+is checked follows what it costs: the cheap ones every 6 hours, the priciest
+once a day, and the bot tells you the monthly cost before you add anything.
 `/providers` lists the services that work and their free tiers — some renew
 monthly, which matters more than the headline number.
 
@@ -32,10 +34,12 @@ Note for self-hosters: Inditex brands (Zara, Bershka, Stradivarius…) block
 datacentre IPs but not home connections, so if you run this from a residential
 network those adapters try direct first and cost you nothing.
 
-**Amazon** is supported (bot-protected, so it needs a key). Paste the link for
-the size you want — on Amazon each size is its own listing, so the link already
-pins your variant. Measured at 1 credit per check, it's the cheapest of the
-bot-protected stores.
+On **Amazon**, paste the link for the size you want — each size is its own
+listing there, so the link already pins your variant. It's the cheapest of the
+bot-protected stores to check.
+
+Share links work too: the short URLs that store apps hand out (`amzn.asia`,
+`s.lazada.sg` and friends) are followed to the real product page.
 
 ## How it works
 
