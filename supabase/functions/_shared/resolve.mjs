@@ -14,6 +14,8 @@
 // network helpers below go through safeFetch, so they inherit the redirect guard.
 
 import { safeFetch } from "./fetcher.mjs";
+import { asinOf, marketplaceOf } from "./adapters/amazon.mjs";
+import { decodeEntities } from "./text.mjs";
 
 // Inditex store/catalog ids are per-market constants, not per-product. Only
 // markets we've actually verified are listed; an unknown market is refused
@@ -49,6 +51,20 @@ export function resolveSelector(url, adapter) {
     case "inditex":
     case "stories":
       return { ok: true, selector: {}, watching: "every size on the page" };
+
+    case "amazon": {
+      // On Amazon each size/colour is its own ASIN, so the pasted link already
+      // pins the exact variant — per-size tracking with nothing to resolve.
+      const asin = asinOf(url);
+      if (!asin) {
+        return { ok: false, reason: "that Amazon link has no product id in it — open the item and copy the URL containing /dp/" };
+      }
+      return {
+        ok: true,
+        selector: { asin, marketplace: marketplaceOf(url) },
+        watching: "this exact option (on Amazon each size is its own listing)",
+      };
+    }
 
     case "asos": {
       const productId = (u.pathname.match(/\/prd\/(\d+)/) || [])[1];
@@ -148,7 +164,7 @@ export async function fetchTitle(url, { fetchImpl = safeFetch } = {}) {
     const title = og ?? (html.match(/<title[^>]*>([^<]+)<\/title>/i) || [])[1];
     if (!title) return null;
     // Strip the "| BRAND" tail sites append.
-    return title.trim().split(/\s*[|–]\s*/)[0].slice(0, 120) || null;
+    return decodeEntities(title).trim().split(/\s*[|–]\s*/)[0].slice(0, 120) || null;
   } catch {
     return null;
   }

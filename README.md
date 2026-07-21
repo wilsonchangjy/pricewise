@@ -32,10 +32,10 @@ Note for self-hosters: Inditex brands (Zara, Bershka, Stradivarius…) block
 datacentre IPs but not home connections, so if you run this from a residential
 network those adapters try direct first and cost you nothing.
 
-**Amazon** isn't supported. It blocks datacentre IPs outright, and going through
-an unblocker costs enough per check that one listing would consume a typical free
-tier. Tracking a specific size would work; watching every size of one garment
-would cost ~40x that.
+**Amazon** is supported (bot-protected, so it needs a key). Paste the link for
+the size you want — on Amazon each size is its own listing, so the link already
+pins your variant. Measured at 1 credit per check, it's the cheapest of the
+bot-protected stores.
 
 ## How it works
 

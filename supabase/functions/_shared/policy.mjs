@@ -21,7 +21,7 @@ export const TIER_COST = { plain: 1, render: 5, premium: 5, super: 10, super_ren
 
 // What each defended brand needs BEFORE its first check teaches us for certain.
 export const ADAPTER_TIER = {
-  bershka: "plain", stradivarius: "plain", asos: "plain",
+  bershka: "plain", stradivarius: "plain", asos: "plain", amazon: "plain",
   inditex: "render", stories: "render", zara: "super",
 };
 

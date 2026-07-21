@@ -20,9 +20,24 @@ const TRACKING_PARAMS = [
   /^(mc_cid|mc_eid|srsltid|_gl|cmpid|s_kwcid|irclickid|rtid)$/i,
 ];
 
+/**
+ * Amazon links arrive carrying pd_rd_i, pf_rd_r, content-id, th, psc and a
+ * session path segment. Two people sharing one product would otherwise create
+ * two tracked rows and pay twice, so collapse to the canonical /dp/{ASIN}.
+ */
+function canonicalAmazon(u) {
+  const asin = u.pathname.match(/\/(?:dp|gp\/product|gp\/aw\/d|product)\/([A-Z0-9]{10})/i);
+  if (!asin) return null;
+  return `${u.origin}/dp/${asin[1].toUpperCase()}`;
+}
+
 /** @param {string} raw @returns {string} */
 export function normalizeUrl(raw) {
   const u = new URL(raw);
+  if (/(^|\.)amazon\.[a-z.]{2,6}$/i.test(u.hostname)) {
+    const canon = canonicalAmazon(u);
+    if (canon) return canon;
+  }
   u.hostname = u.hostname.toLowerCase();
   u.hash = "";
   if ((u.protocol === "https:" && u.port === "443") || (u.protocol === "http:" && u.port === "80")) u.port = "";
