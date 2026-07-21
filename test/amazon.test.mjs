@@ -38,7 +38,11 @@ test("availability prose maps to stock states", () => {
   assert.equal(stateFromAvailability("Only 3 left in stock - order soon."), STATE.LOW_STOCK);
   assert.equal(stateFromAvailability("Currently unavailable."), STATE.OUT_OF_STOCK);
   assert.equal(stateFromAvailability("We don't know when or if this item will be back"), STATE.OUT_OF_STOCK);
-  assert.equal(stateFromAvailability("some phrasing we've never seen"), STATE.OUT_OF_STOCK, "unknown must not read as buyable");
+  // Unrecognised wording must be "I don't know", NOT "sold out" — guessing
+  // sold-out would fire a false alert and then go permanently quiet.
+  assert.equal(stateFromAvailability("some phrasing we've never seen"), null);
+  assert.equal(stateFromAvailability("Auf Lager"), null, "German is not English");
+  assert.equal(stateFromAvailability(""), null);
 });
 
 test("ASIN and marketplace come out of the URL", () => {
@@ -66,4 +70,31 @@ test("entity decoding handles the double-encoded case too", () => {
   assert.equal(decodeEntities("Levi&amp;#39;s"), "Levi's");
   assert.equal(decodeEntities("Coat &ndash; Navy"), "Coat – Navy");
   assert.equal(decodeEntities("A &amp; B"), "A & B");
+});
+
+const OOS = readFileSync(new URL("./fixtures/amazon-sg-unavailable.html", import.meta.url), "utf8");
+
+test("a genuinely unavailable item parses as out of stock, with no price", () => {
+  const r = parseAmazon(OOS, { url: "https://www.amazon.sg/dp/B0BDHWDR12" });
+  assert.equal(r.ok, true);
+  assert.equal(r.available, false);
+  assert.equal(r.variants[0].state, "out_of_stock");
+  assert.equal(r.price, undefined, "Amazon shows no price on an unavailable item");
+});
+
+test("wording we can't classify is a SOFT failure, not a false sold-out", () => {
+  const german = '<html><span id="productTitle">Hemd</span>'
+    + '<span class="primary-availability-message">Auf Lager</span></html>';
+  const r = parseAmazon(german, { url: "https://www.amazon.de/dp/B0BZJ512J2" });
+  assert.equal(r.ok, false);
+  assert.equal(r.kind, "soft");
+  assert.match(r.message, /non-English marketplace/);
+});
+
+test("a non-English Amazon link is refused at /add rather than tracked", async () => {
+  const { resolveSelector } = await import("../supabase/functions/_shared/resolve.mjs");
+  const r = resolveSelector("https://www.amazon.de/dp/B0BZJ512J2", "amazon");
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /English/);
+  assert.equal(resolveSelector("https://www.amazon.sg/dp/B0BZJ512J2", "amazon").ok, true);
 });

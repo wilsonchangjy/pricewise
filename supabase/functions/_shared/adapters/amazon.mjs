@@ -35,17 +35,19 @@ export function asinOf(url) {
 }
 
 /**
- * Amazon states its availability in prose, so we read prose. Anything we don't
- * recognise is NOT buyable: sending someone to a page that won't sell them the
- * thing is worse than staying quiet.
+ * Amazon states availability in prose, so we read prose — and the phrasing is
+ * per-language. Returns NULL when we can't classify it, which the caller turns
+ * into a soft failure. Guessing "sold out" for wording we don't recognise would
+ * fire a false SOLD OUT on a perfectly available item and then go silent
+ * forever, which is worse than admitting we can't read the page.
  */
 export function stateFromAvailability(text) {
-  const t = String(text ?? "").toLowerCase();
-  if (!t) return STATE.OUT_OF_STOCK;
-  if (/currently unavailable|out of stock|we don't know when/.test(t)) return STATE.OUT_OF_STOCK;
+  const t = String(text ?? "").toLowerCase().trim();
+  if (!t) return null;
+  if (/currently unavailable|out of stock|we don't know when|unavailable\b/.test(t)) return STATE.OUT_OF_STOCK;
   if (/only \d+ left|order soon/.test(t)) return STATE.LOW_STOCK;
-  if (/in stock|usually (ships|dispatch)|available to ship/.test(t)) return STATE.IN_STOCK;
-  return STATE.OUT_OF_STOCK;
+  if (/in stock|in stock soon|usually (ships|dispatch)|available to ship|dispatched within/.test(t)) return STATE.IN_STOCK;
+  return null;
 }
 
 const clean = (s) => decodeEntities(String(s ?? "")).replace(/\s+/g, " ").trim();
@@ -86,6 +88,16 @@ export function parseAmazon(html, item) {
     "",
   );
   const state = stateFromAvailability(availabilityText);
+  if (state === null) {
+    return {
+      ok: false,
+      kind: "soft", // parsed the page, couldn't trust the answer
+      message: availabilityText
+        ? `amazon: unrecognised availability wording ("${availabilityText.slice(0, 40)}") — likely a non-English marketplace`
+        : "amazon: no availability text found (page shape changed?)",
+      checkedAt,
+    };
+  }
 
   // A missing price on an otherwise-parsed page means "can't be bought right
   // now" far more often than "free", so don't report availability off it.

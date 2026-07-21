@@ -26,6 +26,9 @@ const ITX_MARKETS = {
 };
 
 // Mango ships numeric size codes; this is the published ladder.
+// Marketplaces whose stock wording our parser understands.
+const AMAZON_ENGLISH = new Set(["sg", "com", "co.uk", "com.au", "ca", "in", "ae", "ie"]);
+
 const MANGO_SIZE_LABELS = { 19: "XS", 20: "S", 21: "M", 22: "L", 23: "XL", 24: "XXL" };
 
 /**
@@ -58,6 +61,12 @@ export function resolveSelector(url, adapter) {
       const asin = asinOf(url);
       if (!asin) {
         return { ok: false, reason: "that Amazon link has no product id in it — open the item and copy the URL containing /dp/" };
+      }
+      // Amazon states stock in the local language and we only read English
+      // phrasing. Better to say so now than to track it and stay silent.
+      const market = marketplaceOf(url);
+      if (market && !AMAZON_ENGLISH.has(market)) {
+        return { ok: false, reason: `I can only read Amazon's English sites so far (yours is amazon.${market}) — noted as a request` };
       }
       return {
         ok: true,
