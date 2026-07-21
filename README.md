@@ -23,7 +23,7 @@ Wix stores**, and any site with standard product data. That's a huge slice of
 fashion retail.
 
 **Bot-protected stores** (Amazon, Zara, Massimo Dutti, Oysho, ASOS, Bershka,
-Stradivarius, & Other Stories) need an unblocker, so they're opt-in: bring your
+Stradivarius, Farfetch, & Other Stories) need an unblocker, so they're opt-in: bring your
 own key with `/setkey` — up to 5 such items, on your own credits. How often each
 is checked follows what it costs: the cheap ones every 6 hours, the priciest
 once a day, and the bot tells you the monthly cost before you add anything.

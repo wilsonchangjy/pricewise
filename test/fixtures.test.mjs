@@ -253,3 +253,16 @@ test("wix: tracking a sold-out size reports IT, not the product", () => {
   const r = parseWix(fx("wix-multivariant.html"), { label: "Yakap Top", variantId: soldOut.id });
   assert.equal(r.available, false, "the whole point: my size is gone even though the product isn't");
 });
+
+test("farfetch: the wired adapter reuses the tested JSON-LD parser", async () => {
+  // Verified live 2026-07-21: SGD 429, sizes S/M/L/XL, 1 credit on the plain tier.
+  const { resolveSelector } = await import("../supabase/functions/_shared/resolve.mjs");
+  const sel = resolveSelector("https://www.farfetch.com/sg/shopping/women/x-item-1.aspx", "farfetch");
+  assert.equal(sel.ok, true);
+  assert.deepEqual(sel.selector, {}, "sizes come from the page, so the URL needs nothing");
+
+  const r = parseJsonLd(fx("farfetch-productgroup.html"), { label: "Farfetch" });
+  assert.equal(r.price, 429);
+  assert.equal(r.currency, "SGD");
+  assert.deepEqual(r.variants.map((v) => v.label), ["S", "M", "L", "XL"]);
+});

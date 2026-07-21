@@ -70,3 +70,10 @@ test("the genuinely free adapters stay free — all verified from production", (
     assert.equal(strategyFor(a), "direct", a);
   }
 });
+
+test("farfetch routes by host and is bot-protected", async () => {
+  const r = await detectAdapter("https://www.farfetch.com/sg/shopping/women/arcina-ori-santina-halterneck-maxi-dress-item-37279145.aspx");
+  assert.equal(r.adapter, "farfetch");
+  assert.equal(r.via, "host", "no network probe needed");
+  assert.equal(strategyFor("farfetch"), "unblocker", "a datacentre IP needs a key for it");
+});

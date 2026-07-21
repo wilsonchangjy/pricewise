@@ -13,6 +13,7 @@ import { readStradivarius } from "./stradivarius.mjs";
 import { readBershka } from "./bershka.mjs";
 import { readWix } from "./wix.mjs";
 import { readAmazon } from "./amazon.mjs";
+import { readFarfetch } from "./farfetch.mjs";
 import { readJsonLd } from "./jsonld.mjs";
 
 const READERS = {
@@ -28,6 +29,7 @@ const READERS = {
   bershka: readBershka,
   wix: readWix,
   amazon: readAmazon,
+  farfetch: readFarfetch,
   jsonld: readJsonLd,
 };
 
