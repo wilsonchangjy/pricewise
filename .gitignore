@@ -4,3 +4,11 @@
 node_modules/
 *.log
 .DS_Store
+
+# Raw site captures used to build adapters. They can contain cookies, session
+# headers and personal data, so they stay local — trimmed, sanitised fixtures
+# go in test/fixtures/ instead (see test/fixtures/amazon-sg-product.html:
+# a 446-byte cut from a 1.4MB page).
+Request Snapshots/
+snapshots/
+*.har

@@ -398,7 +398,9 @@ async function setKey(user, chatId, key, providerWord) {
 
   return reply(chatId, [
     `🔐 ${p.label} key saved (encrypted) and your message deleted.`,
-    `You can now track bot-protected stores — up to ${MAX_DEFENDED} of them, checked once a day so your credits last.`,
+    `You can now track bot-protected stores — up to ${MAX_DEFENDED} of them.`,
+    "How often I check each one depends on what it costs: the cheap ones every 6h,",
+    "the priciest once a day. I'll tell you the cost before you add anything.",
     p.verified ? "" : `Heads up: I haven't been able to test ${p.label} end to end yet, so tell me if a check fails and I'll dig in.`,
     "Paste one of those links to try it.",
   ].filter(Boolean).join("\n"));
@@ -411,7 +413,7 @@ async function showProviders(chatId) {
     .map((p) =>
     `• ${p.label}${p.verified ? "" : " (untested by me)"}\n  ${p.freeNote}\n  ${p.signup}`);
   return sendMessage(BOT_TOKEN, chatId, [
-    "🔑 Bot-protected shops (Zara, Massimo Dutti, ASOS…) need an unblocker service.",
+    "🔑 Bot-protected shops (Amazon, Zara, Massimo Dutti, ASOS…) need an unblocker service.",
     "Bring your own key — you stay in control of the spend:",
     "",
     ...lines,
@@ -561,7 +563,8 @@ async function showPrefs(user, chatId) {
     `• ${count ?? 0}/${MAX_ITEMS} items on your list`,
     `• fastest check is 3h — most shops don't change prices faster than that, and`,
     "  checking harder mostly earns blocks rather than earlier alerts",
-    `• bot-protected shops (Zara, ASOS…) are checked once a day on your own key`,
+    `• bot-protected shops (Zara, Amazon, ASOS…) run on your own key, and how`,
+    "  often depends on what each costs to check — 6h for the cheap ones, daily for Zara",
     ...(keyRow?.credits_remaining != null
       ? ["", `🔋 ${PROVIDERS[keyRow.provider]?.label ?? keyRow.provider}: ${keyRow.credits_remaining} credits left`,
          "   (as of your last bot-protected check — most free plans reset monthly)"]

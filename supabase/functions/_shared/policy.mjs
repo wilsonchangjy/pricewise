@@ -12,7 +12,7 @@ export const MAX_ITEMS = 20;               // per user, total list size
 export const MAX_DEFENDED = 5;             // per user, their own key
 export const FREE_INTERVAL_MIN = 360;      // DEFAULT: every 6h
 export const MIN_INTERVAL_MIN = 180;       // FLOOR: never faster than 3h
-export const DEFENDED_INTERVAL_MIN = 1440; // defended: once a day, not negotiable
+export const DEFENDED_INTERVAL_MIN = 1440; // fallback until a check reveals the real tier cost
 
 // ── measured credit costs (Scrape.do, 2026-07-21) ───────────────────────────
 // Real numbers beat the worst case we used to assume. Knowing what a check
@@ -70,7 +70,7 @@ export async function planAdd(url, ctx) {
         adapter: det.adapter,
         message:
           "That brand is bot-protected, so it needs an unblocker. Add your own ScrapingBee key with /setkey to track it " +
-          `(up to ${MAX_DEFENDED} such items, checked once a day) — or send me a supported store instead.`,
+          `(up to ${MAX_DEFENDED} such items — how often depends on what that shop costs to check) — or send me a supported store instead.`,
       };
     }
     if (ctx.userDefendedCount >= MAX_DEFENDED) {
