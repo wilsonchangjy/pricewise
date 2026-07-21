@@ -14,6 +14,29 @@ export const FREE_INTERVAL_MIN = 360;      // DEFAULT: every 6h
 export const MIN_INTERVAL_MIN = 180;       // FLOOR: never faster than 3h
 export const DEFENDED_INTERVAL_MIN = 1440; // defended: once a day, not negotiable
 
+// ── measured credit costs (Scrape.do, 2026-07-21) ───────────────────────────
+// Real numbers beat the worst case we used to assume. Knowing what a check
+// actually costs is what lets us quote a price at /add and set a sane cadence.
+export const TIER_COST = { plain: 1, render: 5, premium: 5, super: 10, super_render: 15, stealth: 25 };
+
+// What each defended brand needs BEFORE its first check teaches us for certain.
+export const ADAPTER_TIER = {
+  bershka: "plain", stradivarius: "plain", asos: "plain",
+  inditex: "render", stories: "render", zara: "super",
+};
+
+// Cadence by cost, not by the blunt "is it defended". A 1-credit check every 6h
+// costs 120/month — trivial — and alerts four times sooner, which is the whole
+// point of the product.
+export const TIER_INTERVAL_MIN = { plain: 360, render: 1440, premium: 1440, super: 1440, super_render: 1440, stealth: 1440 };
+
+/** Rough credits per month for one product at a given cadence. */
+export function monthlyCredits(tier, intervalMinutes) {
+  const cost = TIER_COST[tier] ?? TIER_COST.render;
+  const checksPerMonth = (30 * 24 * 60) / Math.max(1, intervalMinutes);
+  return Math.round(cost * checksPerMonth);
+}
+
 // What /every accepts. 3h is the floor because a shop that sells out inside
 // three hours is rare, and polling faster mostly buys bans, not saves.
 export const INTERVAL_OPTIONS = { "3h": 180, "6h": 360, "12h": 720, "1d": 1440 };

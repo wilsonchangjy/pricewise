@@ -7,7 +7,7 @@
 // @ts-nocheck  (the _shared modules are plain ESM/JSDoc, shared with the Node tests)
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { parseCommand } from "../_shared/commands.mjs";
-import { planAdd, MAX_DEFENDED, MAX_ITEMS, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, FREE_INTERVAL_MIN, DEFENDED_INTERVAL_MIN } from "../_shared/policy.mjs";
+import { planAdd, MAX_DEFENDED, MAX_ITEMS, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, FREE_INTERVAL_MIN, DEFENDED_INTERVAL_MIN, ADAPTER_TIER, TIER_INTERVAL_MIN, monthlyCredits } from "../_shared/policy.mjs";
 import { detectAdapter } from "../_shared/router.mjs";
 import { sendMessage, deleteMessage, editMessage, answerCallback } from "../_shared/telegram.mjs";
 import { labelFromUrl } from "../_shared/label.mjs";
@@ -293,6 +293,7 @@ async function addItem(user, chatId, rawUrl) {
     `👀 ${plan.message}`,
     product.title,
     `Watching: ${res.watching}.`,
+    ...(await costNote(user, plan, product)),
     "I'll send a baseline reading shortly, then only when something changes.",
   ].join("\n"));
 }
@@ -786,3 +787,36 @@ async function renderHistory(sub, chatId, messageId, cqId) {
 /** A size change should be answered by the next tick, not in six hours. */
 const bringCheckForward = (productId) =>
   db.from("tracked_products").update({ next_check_at: new Date().toISOString() }).eq("id", productId);
+
+/**
+ * Tell someone what a bot-protected item will cost BEFORE they commit to it.
+ * Free stores say nothing — there's nothing to spend.
+ */
+async function costNote(user, plan, product) {
+  if (plan.strategy !== "unblocker") return [];
+
+  const tier = product.unblocker_tier ?? ADAPTER_TIER[plan.adapter] ?? "render";
+  const interval = product.check_interval_minutes ?? TIER_INTERVAL_MIN[tier] ?? DEFENDED_INTERVAL_MIN;
+  const cost = monthlyCredits(tier, interval);
+
+  const { data: key } = await db.from("user_api_keys")
+    .select("credits_remaining").eq("user_id", user.id).maybeSingle();
+
+  // Sum what everything else on their list is already committed to.
+  const { data: rows } = await db
+    .from("subscriptions")
+    .select("interval_minutes, tracked_products(adapter, fetch_strategy, unblocker_tier, check_interval_minutes)")
+    .eq("user_id", user.id).eq("status", "active");
+  const committed = (rows ?? [])
+    .filter((r) => r.tracked_products?.fetch_strategy === "unblocker")
+    .reduce((n, r) => {
+      const p = r.tracked_products;
+      const t = p.unblocker_tier ?? ADAPTER_TIER[p.adapter] ?? "render";
+      return n + monthlyCredits(t, r.interval_minutes ?? p.check_interval_minutes ?? DEFENDED_INTERVAL_MIN);
+    }, 0);
+
+  const line = `💳 About ${cost} credits/month on your key.`;
+  return key?.credits_remaining != null
+    ? [`${line} Your list now commits ~${committed}/month, and you have ${key.credits_remaining} left.`]
+    : [line];
+}

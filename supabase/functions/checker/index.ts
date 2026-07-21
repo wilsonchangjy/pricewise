@@ -13,6 +13,7 @@ import { sendMessage, isUnreachable } from "../_shared/telegram.mjs";
 import { contextLine } from "../_shared/history.mjs";
 import { matchVariant } from "../_shared/variants.mjs";
 import { verifyPrice } from "../_shared/verify.mjs";
+import { TIER_INTERVAL_MIN } from "../_shared/policy.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const BATCH_SIZE = Number(Deno.env.get("CHECK_BATCH_SIZE") ?? 20);
@@ -98,6 +99,21 @@ async function checkProduct(product) {
     : Infinity;
   const startTier = tierAge < TIER_MEMORY_DAYS ? (product.unblocker_tier ?? undefined) : undefined;
 
+  // Running dry should look like pausing, not like breaking. A failed fetch would
+  // count against the product and eventually park it — punishing the user for an
+  // empty wallet. Wait for the monthly reset instead.
+  if (product.fetch_strategy === "unblocker" && funderId) {
+    const { data: k } = await db.from("user_api_keys")
+      .select("credits_remaining").eq("user_id", funderId).maybeSingle();
+    if (k?.credits_remaining != null && k.credits_remaining < MIN_CREDITS_TO_FETCH) {
+      console.warn(`product ${product.id}: funder ${funderId} out of credits (${k.credits_remaining}) — deferring`);
+      await db.from("tracked_products")
+        .update({ next_check_at: minutesFromNow(12 * 60) })
+        .eq("id", product.id);
+      return { ok: true, alerts: 0 };
+    }
+  }
+
   const reading = await selectAdapter(product.adapter)(item, { unblockerKey, unblockerProvider, startTier });
 
   if (!reading.ok) {
@@ -157,10 +173,16 @@ async function checkProduct(product) {
     consecutive_failures: 0,
     status: "active",
     next_check_at: minutesFromNow(product.check_interval_minutes),
-    ...(reading.tier && reading.tier !== product.unblocker_tier
-      ? { unblocker_tier: reading.tier, unblocker_tier_at: new Date().toISOString() }
-      : reading.tier
-      ? { unblocker_tier_at: new Date().toISOString() }
+    ...(reading.tier
+      ? {
+          unblocker_tier: reading.tier,
+          unblocker_tier_at: new Date().toISOString(),
+          // Cadence follows measured cost: a 1-credit check can afford 6h,
+          // a 10-credit one cannot. Only widen/narrow what the tier implies.
+          ...(reading.tier !== product.unblocker_tier && TIER_INTERVAL_MIN[reading.tier]
+            ? { check_interval_minutes: TIER_INTERVAL_MIN[reading.tier] }
+            : {}),
+        }
       : {}),
   }).eq("id", product.id);
 
@@ -347,6 +369,7 @@ function rowToReading(row) {
 }
 
 const LOW_CREDIT_WARN = 100;
+const MIN_CREDITS_TO_FETCH = 15; // below this, wait for the reset rather than fail
 
 /**
  * Persist the funder's observed balance, and tell them ONCE when it's nearly
