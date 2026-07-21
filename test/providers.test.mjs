@@ -122,3 +122,26 @@ test("an unknown remembered tier falls back to the full ladder", async () => {
   await fetchViaUnblockerTiered("https://x.test/p", { apiKey: "K", provider: "scrapedo", startTier: "nonsense" });
   assert.equal(calls[0], "plain");
 });
+
+// ── block detection: precision matters, it costs money ───────────────────────
+test("a Cloudflare-SERVED page doesn't trigger escalation", async () => {
+  // /cdn-cgi/challenge-platform/ is CF's script path and appears on normal pages.
+  // Treating it as a block made us pay 1cr -> 5cr -> 10cr for a page already fine.
+  const served = `<html><body>${"x".repeat(60000)}`
+    + `<script src="/cdn-cgi/challenge-platform/h/b/scripts/jsd/main.js"></script></body></html>`;
+  let calls = 0;
+  const fetchImpl = async () => { calls++; return { ok: true, status: 200, headers: { get: () => null }, text: async () => served }; };
+  globalThis.fetch = fetchImpl;
+  const r = await fetchViaUnblockerTiered("https://ssense.test/p", { apiKey: "K", provider: "scrapedo" });
+  assert.equal(calls, 1, "one request, cheapest tier");
+  assert.equal(r.mode, "plain");
+});
+
+test("a real Akamai challenge still climbs the ladder", async () => {
+  const shell = `<html><head><meta http-equiv="refresh" content="5; URL=/x?bm-verify=AAQ"/></head></html>`;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return { ok: true, status: 200, headers: { get: () => null }, text: async () => shell }; };
+  const r = await fetchViaUnblockerTiered("https://zara.test/p", { apiKey: "K", provider: "scrapedo" });
+  assert.ok(calls > 1, "must escalate when genuinely blocked");
+  assert.ok(!r.ok || /bm-verify/.test(r.body), "and never report a challenge page as usable");
+});

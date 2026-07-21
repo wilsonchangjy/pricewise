@@ -21,7 +21,11 @@ import { PROVIDERS, DEFAULT_PROVIDER, buildRequestUrl } from "./providers.mjs";
 const looksBlocked = (status, body) =>
   status === 403 || status === 429 || status === 401 || !body ||
   /<title>[^<]*(access denied|attention required|just a moment|server busy)/i.test(body) ||
-  /bm-verify|_abck|challenge-platform|Incapsula|__cf_chl/i.test(body) ||
+  // NB: "challenge-platform" is NOT a block signal — /cdn-cgi/challenge-platform/
+  // is Cloudflare's script path and appears on perfectly normal served pages.
+  // Matching it made us escalate 1cr -> 5cr -> 10cr on any Cloudflare-fronted
+  // site that had already answered fine. Match the real challenge markers only.
+  /bm-verify|__cf_chl|cf-chl-bypass|px-captcha|Incapsula_Resource/i.test(body) ||
   (body.length < 5000 && /http-equiv=["\']?refresh/i.test(body));
 
 /**
