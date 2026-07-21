@@ -22,6 +22,7 @@ const HOST_MAP = [
   [/(?:^|\.)amazon\.[a-z.]{2,6}$/i, "amazon"],
   [/(?:^|\.)farfetch\.com$/i, "farfetch"],
   [/(?:^|\.)mrporter\.com$/i, "mrporter"],
+  [/(?:^|\.)ebay\.[a-z.]{2,6}$/i, "ebay"],
 ];
 
 // Adapters that must go through the unblocker (credits). Everything else is free.
@@ -31,7 +32,7 @@ const HOST_MAP = [
 // Unavailable", API paths included: they block the address, not the route. The
 // adapters still try direct first (a self-hoster on a residential IP gets it for
 // nothing), but /add must tell cloud users the truth about needing a key.
-const DEFENDED = new Set(["inditex", "zara", "asos", "stories", "bershka", "stradivarius", "amazon", "farfetch", "mrporter"]);
+const DEFENDED = new Set(["inditex", "zara", "asos", "stories", "bershka", "stradivarius", "amazon", "farfetch", "mrporter", "ebay"]);
 
 export const strategyFor = (adapter) => (DEFENDED.has(adapter) ? "unblocker" : "direct");
 

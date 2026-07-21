@@ -44,9 +44,23 @@ function canonicalLazada(u) {
   return /\/products\/pdp-i\d+/.test(u.pathname) ? `${u.origin}${u.pathname}` : null;
 }
 
+/**
+ * eBay links arrive with _skw, itmmeta, hash, itmprp, keyword and more — often
+ * longer than the page title. Item ids are global, and regional hosts can't be
+ * reached through the unblocker, so everything collapses to the .com listing.
+ */
+function canonicalEbay(u) {
+  const m = u.pathname.match(/\/itm\/(?:[^/]*\/)?(\d{9,})/);
+  return m ? `https://www.ebay.com/itm/${m[1]}` : null;
+}
+
 /** @param {string} raw @returns {string} */
 export function normalizeUrl(raw) {
   const u = new URL(raw);
+  if (/(^|\.)ebay\.[a-z.]{2,6}$/i.test(u.hostname)) {
+    const canon = canonicalEbay(u);
+    if (canon) return canon;
+  }
   if (/(^|\.)lazada\.[a-z.]{2,6}$/i.test(u.hostname)) {
     const canon = canonicalLazada(u);
     if (canon) return canon;

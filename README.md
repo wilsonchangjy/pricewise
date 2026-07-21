@@ -23,7 +23,7 @@ Wix stores**, and any site with standard product data. That's a huge slice of
 fashion retail.
 
 **Bot-protected stores** (Amazon, Zara, Massimo Dutti, Oysho, ASOS, Bershka,
-Stradivarius, Farfetch, MR PORTER, & Other Stories) need an unblocker, so they're opt-in: bring your
+Stradivarius, Farfetch, MR PORTER, eBay, & Other Stories) need an unblocker, so they're opt-in: bring your
 own key with `/setkey` — up to 5 such items, on your own credits. How often each
 is checked follows what it costs: the cheap ones every 6 hours, the priciest
 once a day, and the bot tells you the monthly cost before you add anything.
@@ -40,6 +40,10 @@ bot-protected stores to check.
 
 Share links work too: the short URLs that store apps hand out (`amzn.asia`,
 `s.lazada.sg` and friends) are followed to the real product page.
+
+**eBay** listings are read from `ebay.com` — regional hosts like `ebay.com.sg`
+can't be reached through an unblocker, and item numbers are global. Prices
+therefore come back in USD, which the bot tells you when you add one.
 
 ## How it works
 

@@ -15,6 +15,7 @@ import { readWix } from "./wix.mjs";
 import { readAmazon } from "./amazon.mjs";
 import { readFarfetch } from "./farfetch.mjs";
 import { readMrPorter } from "./mrporter.mjs";
+import { readEbay } from "./ebay.mjs";
 import { readJsonLd } from "./jsonld.mjs";
 
 const READERS = {
@@ -32,6 +33,7 @@ const READERS = {
   amazon: readAmazon,
   farfetch: readFarfetch,
   mrporter: readMrPorter,
+  ebay: readEbay,
   jsonld: readJsonLd,
 };
 

@@ -15,6 +15,7 @@
 
 import { safeFetch } from "./fetcher.mjs";
 import { asinOf, marketplaceOf } from "./adapters/amazon.mjs";
+import { itemIdOf } from "./adapters/ebay.mjs";
 import { decodeEntities } from "./text.mjs";
 
 // Inditex store/catalog ids are per-market constants, not per-product. Only
@@ -47,6 +48,21 @@ export function resolveSelector(url, adapter) {
 
   switch (adapter) {
     // ── nothing to resolve: these adapters read the page/handle directly ──────
+    case "ebay": {
+      const itemId = itemIdOf(url);
+      if (!itemId) {
+        return { ok: false, reason: "that eBay link has no item number in it — open the listing and copy the URL containing /itm/" };
+      }
+      // Regional eBay hosts can't be reached through the unblocker, so we read
+      // the global listing. Say so: the price will be USD, not the local
+      // currency shown on a regional site.
+      return {
+        ok: true,
+        selector: { itemId },
+        watching: "this listing on eBay.com — prices come back in USD, not your local currency",
+      };
+    }
+
     case "farfetch":
     case "mrporter":
       // Sizes arrive as JSON-LD hasVariant, and each COLOURWAY is its own URL,
