@@ -51,7 +51,12 @@ function canonicalLazada(u) {
  */
 function canonicalEbay(u) {
   const m = u.pathname.match(/\/itm\/(?:[^/]*\/)?(\d{9,})/);
-  return m ? `https://www.ebay.com/itm/${m[1]}` : null;
+  if (!m) return null;
+  // `var` names the chosen variation and CHANGES THE PRICE — measured US $5.69
+  // without it versus US $5.99 with it on the same listing. It is not tracking
+  // junk, so it survives canonicalisation the way Shopify's ?variant= does.
+  const variation = u.searchParams.get("var");
+  return `https://www.ebay.com/itm/${m[1]}${variation ? `?var=${encodeURIComponent(variation)}` : ""}`;
 }
 
 /** @param {string} raw @returns {string} */

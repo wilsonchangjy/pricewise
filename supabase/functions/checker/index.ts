@@ -117,6 +117,19 @@ async function checkProduct(product) {
   const reading = await selectAdapter(product.adapter)(item, { unblockerKey, unblockerProvider, startTier });
 
   if (!reading.ok) {
+    // Some failures will never resolve — an eBay auction is not going to become
+    // a fixed-price listing. Say so once and park it, rather than retrying ten
+    // times over a fortnight before the user hears anything.
+    if (reading.kind === "permanent") {
+      await db.from("tracked_products")
+        .update({ status: "dead", consecutive_failures: MAX_FAILURES, verify_note: reading.message })
+        .eq("id", product.id);
+      for (const w of subs) {
+        await sendMessage(BOT_TOKEN, w.users.telegram_chat_id,
+          `🚫 I can't track ${product.title}\n${reading.message}\nIt's off your list — /remove tidies it up.`);
+      }
+      return { ok: false, alerts: 0 };
+    }
     await recordFailure(product, reading.message, reading.kind, subs);
     return { ok: false, alerts: 0 };
   }

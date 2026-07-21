@@ -53,21 +53,56 @@ export function itemIdOf(url) {
  * listing that may have ended.
  */
 export function stateFromEbay(html) {
+  // Ended listings are a page-level fact, so this check is page-wide.
   if (/This listing (has ended|was ended)|no longer available|item is no longer/i.test(html)) {
     return STATE.OUT_OF_STOCK;
   }
-  if (/\bLAST ONE\b/i.test(html)) return STATE.LOW_STOCK;
-  const avail = html.match(/(More than \d+ available|\d+ available|Out of [Ss]tock|Sold out)/);
-  if (avail) {
-    if (/out of stock|sold out/i.test(avail[1])) return STATE.OUT_OF_STOCK;
-    // match() puts the whole match at [0]; reading [1] made every quantity 0,
-    // so "2 available" reported as plenty in stock.
-    const n = Number((avail[1].match(/\d+/) || [])[0] ?? 0);
-    return n > 0 && n <= 2 ? STATE.LOW_STOCK : STATE.IN_STOCK;
+
+  // EVERYTHING ELSE MUST BE SCOPED. An eBay page carries carousels of other
+  // people's listings, each with its own badge — this page had four "LAST ONE"
+  // and three "Out of stock" markers belonging to neighbours, while the item
+  // itself had ten available. Scanning the whole page reported a sold-out item
+  // as buyable.
+  const region = availabilityRegion(html);
+  if (region === null) {
+    // Plenty of fixed-price listings show no quantity line at all; a live buy
+    // control is then the only honest signal we have.
+    return listingKind(html) === "fixed" ? STATE.IN_STOCK : null;
   }
-  // A live listing always renders a buy control; its absence is our signal.
-  if (/Buy It Now|Add to cart|Place bid/i.test(html)) return STATE.IN_STOCK;
+
+  if (/out of stock|sold out/i.test(region)) return STATE.OUT_OF_STOCK;
+  if (/last one/i.test(region)) return STATE.LOW_STOCK;
+
+  const n = Number((region.match(/(\d+)\s+available/i) || [])[1] ?? NaN);
+  if (Number.isFinite(n)) return n === 0 ? STATE.OUT_OF_STOCK : n <= 2 ? STATE.LOW_STOCK : STATE.IN_STOCK;
+  if (/more than \d+ available/i.test(region)) return STATE.IN_STOCK;
+
   return null;
+}
+
+/**
+ * Fixed price or auction? The buy-box CTA is the tell: "Buy It Now"/"Add to
+ * cart" versus "Place bid". It matters because an auction's price is the
+ * CURRENT BID — it only ever rises — so a price-drop alert could never fire
+ * and every bid would look like a price increase.
+ */
+export function listingKind(html) {
+  const i = String(html).search(/x-buybox/i);
+  if (i < 0) return null;
+  const cta = String(html).slice(i, i + 2500).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  if (/Buy It Now|Add to cart|Add to basket/i.test(cta)) return "fixed";
+  if (/Place bid|Bid now/i.test(cta)) return "auction";
+  return null;
+}
+
+/** The listing's OWN availability line, as plain text. */
+function availabilityRegion(html) {
+  const m = String(html).match(/(?:id="?qtyAvailability|x-quantity__availability)[^>]*>([\s\S]{0,300})/i);
+  if (!m) return null;
+  // Cut at the container's own closing tag. Without this the window runs on
+  // into the next carousel and picks up a neighbour's "LAST ONE".
+  const own = m[1].split(/<\/(?:div|span|ul)>/i)[0];
+  return own.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
 /**
@@ -83,6 +118,17 @@ export function parseEbay(html, item) {
   const title = decodeEntities(String(rawTitle ?? "")).replace(/\s+/g, " ").trim();
   if (!title) {
     return { ok: false, kind: "parse", message: "ebay: no listing title (blocked, or the page shape changed)", checkedAt };
+  }
+
+  // Auctions are a different product from the one we alert on. Say so once,
+  // permanently, instead of tracking a number that can only go up.
+  if (listingKind(html) === "auction") {
+    return {
+      ok: false,
+      kind: "permanent",
+      message: "that's an eBay auction, and I only track fixed-price listings — an auction's price is the current bid, so it only ever goes up and a price-drop alert could never fire. A 'Buy It Now' listing works fine.",
+      checkedAt,
+    };
   }
 
   const priceText = (html.match(/x-price-primary[\s\S]{0,300}?ux-textspans[^>]*>([^<]{2,40})/i) || [])[1];
@@ -102,7 +148,7 @@ export function parseEbay(html, item) {
     // One listing is one thing — eBay variations would need the msku data, and
     // most of what people watch here is a single one-off item.
     variants: [{
-      id: String(item.variantSelector?.itemId ?? itemIdOf(item.url) ?? "default"),
+      id: String(item.variantSelector?.variation ?? item.variantSelector?.itemId ?? itemIdOf(item.url) ?? "default"),
       label: title.slice(0, 60),
       price,
       available,

@@ -56,10 +56,13 @@ export function resolveSelector(url, adapter) {
       // Regional eBay hosts can't be reached through the unblocker, so we read
       // the global listing. Say so: the price will be USD, not the local
       // currency shown on a regional site.
+      const variation = (() => { try { return new URL(url).searchParams.get("var"); } catch { return null; } })();
       return {
         ok: true,
-        selector: { itemId },
-        watching: "this listing on eBay.com — prices come back in USD, not your local currency",
+        selector: { itemId, ...(variation && { variation }) },
+        watching: variation
+          ? "the exact option in your link, on eBay.com — prices come back in USD"
+          : "this listing on eBay.com — prices come back in USD, not your local currency",
       };
     }
 

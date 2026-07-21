@@ -5,16 +5,31 @@ import { parseEbay, parseMoney, itemIdOf, stateFromEbay } from "../supabase/func
 import { normalizeUrl } from "../supabase/functions/_shared/urlguard.mjs";
 import { STATE } from "../supabase/functions/_shared/stock.mjs";
 
-const FIXTURE = readFileSync(new URL("./fixtures/ebay-listing.html", import.meta.url), "utf8");
+const fixture = (n) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url), "utf8");
 
-// Captured live 2026-07-21 from Wilson's watched listing.
-test("parses a real listing: title, USD price, last-one stock", () => {
-  const r = parseEbay(FIXTURE, { url: "https://www.ebay.com/itm/307063458775" });
+// Both captured live 2026-07-21. They differ by LISTING TYPE, which is the axis
+// that actually changes eBay's behaviour — not by product.
+const AUCTION = fixture("ebay-auction.html");   // Carhartt jacket, "Place bid"
+const FIXED = fixture("ebay-fixed.html");       // ?var= listing, "10 available"
+
+test("parses a real fixed-price listing: title, USD price, stock", () => {
+  const r = parseEbay(FIXED, { url: "https://www.ebay.com/itm/287062522407?var=589110017587" });
   assert.equal(r.ok, true);
-  assert.equal(r.price, 143.5);
+  assert.equal(r.price, 5.99, "the variation price, not the $5.69 headline");
   assert.equal(r.currency, "USD");
-  assert.equal(r.variants[0].state, STATE.LOW_STOCK, "'LAST ONE' is exactly the signal that matters here");
-  assert.match(r.title, /Carhartt J97/);
+  assert.equal(r.available, true);
+  assert.equal(r.variants[0].state, STATE.IN_STOCK, "10 available, despite neighbours' sold-out badges");
+  // eBay writes " as &#034; — a raw title would read 10/12/14&#034; Electronic.
+  assert.match(r.title, /^10\/12\/14" Electronic Throttle/);
+});
+
+// The listing Wilson first sent turned out to be an auction. Its "US $143.50" is
+// a CURRENT BID: it only rises, so a price-drop alert could never fire.
+test("a real auction page is refused permanently, on sight", () => {
+  const r = parseEbay(AUCTION, { url: "https://www.ebay.com/itm/307063458775" });
+  assert.equal(r.ok, false);
+  assert.equal(r.kind, "permanent");
+  assert.match(r.message, /only ever goes up/);
 });
 
 test("eBay's money formats parse, including the European decimal", () => {
@@ -32,11 +47,44 @@ test("an ended listing is out of stock, not in stock", () => {
   assert.equal(stateFromEbay("<p>This item is no longer available</p>"), STATE.OUT_OF_STOCK);
 });
 
-test("quantity wording maps to states", () => {
-  assert.equal(stateFromEbay("<span>LAST ONE</span>"), STATE.LOW_STOCK);
-  assert.equal(stateFromEbay("<span>2 available</span>"), STATE.LOW_STOCK);
-  assert.equal(stateFromEbay("<span>More than 10 available</span>"), STATE.IN_STOCK);
-  assert.equal(stateFromEbay("<span>Out of Stock</span>"), STATE.OUT_OF_STOCK);
+const qty = (text) => `<div id="qtyAvailability">${text}</div>`;
+
+test("quantity wording maps to states, read from the listing's OWN container", () => {
+  assert.equal(stateFromEbay(qty("Last one")), STATE.LOW_STOCK);
+  assert.equal(stateFromEbay(qty("2 available")), STATE.LOW_STOCK);
+  assert.equal(stateFromEbay(qty("10 available 6 sold")), STATE.IN_STOCK);
+  assert.equal(stateFromEbay(qty("Out of stock")), STATE.OUT_OF_STOCK);
+  assert.equal(stateFromEbay(qty("0 available")), STATE.OUT_OF_STOCK);
+});
+
+// THE BUG THIS CAUGHT: an eBay page carries carousels of OTHER listings, each
+// with its own badge. This page had four "LAST ONE" and three "Out of stock"
+// markers belonging to neighbours while the item itself had ten available.
+test("a neighbour's badge never decides OUR item's stock", () => {
+  const page = `<div class="carousel">LAST ONE</div><div>Out of stock</div>`
+    + qty("10 available 6 sold")
+    + `<div class="more-carousel">LAST ONE</div>`;
+  assert.equal(stateFromEbay(page), STATE.IN_STOCK);
+});
+
+test("auctions are refused permanently, not tracked", () => {
+  const auction = `<title>Vintage jacket | eBay</title><div class="x-buybox"><div class="x-buybox-cta">Place bid Add to Watchlist</div></div>`;
+  const r = parseEbay(auction, { url: "https://www.ebay.com/itm/307063458775" });
+  assert.equal(r.ok, false);
+  assert.equal(r.kind, "permanent", "an auction will never become a fixed-price listing");
+  assert.match(r.message, /only ever goes up/);
+});
+
+test("a fixed-price listing with no quantity line is still in stock", () => {
+  const page = `<title>Thing | eBay</title><div class="x-buybox"><div class="x-buybox-cta">Buy It Now Add to cart</div></div>`;
+  assert.equal(stateFromEbay(page), STATE.IN_STOCK);
+});
+
+test("the eBay variation id survives, because it changes the price", () => {
+  // Measured on one listing: US $5.69 without ?var=, US $5.99 with it.
+  const withVar = normalizeUrl("https://www.ebay.com.sg/itm/287062522407?_skw=x&hash=y&var=589110017587");
+  assert.equal(withVar, "https://www.ebay.com/itm/287062522407?var=589110017587");
+  assert.notEqual(withVar, normalizeUrl("https://www.ebay.com/itm/287062522407"));
 });
 
 test("a page we can't classify is a SOFT failure, never a false 'in stock'", () => {
