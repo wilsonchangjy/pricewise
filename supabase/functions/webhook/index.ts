@@ -75,7 +75,6 @@ const HELP = [
   "/setevery <3h|6h|12h|1d> — default check frequency for new items",
   "/remove <n> — stop tracking one",
   "/setprice <n> <price> — only alert me at/below this",
-  "/pause <n> · /resume <n> — mute / unmute",
   "/setkey <key> — your own unblocker key for bot-protected stores",
   "   (I delete that message from the chat the moment I read it)",
   "/providers — which unblocker services work, and their free tiers",
@@ -737,7 +736,7 @@ async function renderItem(sub, chatId, messageId, cqId) {
   ].filter(Boolean);
 
   return editMessage(BOT_TOKEN, chatId, messageId, `${p.title}\n${bits.join("\n")}\n${p.url}`,
-    { keyboard: itemKeyboard(sub.id, { paused: sub.status === "paused" }) });
+    { keyboard: itemKeyboard(sub.id) });
 }
 
 /** The point of the whole feature: pick from what the shop ACTUALLY offers. */

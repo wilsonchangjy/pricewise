@@ -37,10 +37,9 @@ export function parseCommand(text) {
     case "/remove":
     case "/delete":
       return arg ? { cmd: "remove", ref: arg } : { cmd: "remove", message: "Which one? /remove <number from /list>" };
-    case "/pause":
-      return arg ? { cmd: "pause", ref: arg } : { cmd: "pause", message: "Which one? /pause <number>" };
-    case "/resume":
-      return arg ? { cmd: "resume", ref: arg } : { cmd: "resume", message: "Which one? /resume <number>" };
+    // /pause and /resume were retired (extremely low use). The mute capability
+    // remains in the webhook's callback handler; only these entry points are
+    // gone, so a typed /pause now falls through to the unknown-command help.
     case "/setprice": {
       const [ref, priceStr] = rest;
       const price = Number(priceStr);

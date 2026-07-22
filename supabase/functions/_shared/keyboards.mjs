@@ -37,12 +37,15 @@ export function listKeyboard(subs) {
 }
 
 /** The per-item action menu. */
-export function itemKeyboard(subId, { paused = false } = {}) {
+export function itemKeyboard(subId) {
+  // Pause/Resume was retired — the use case proved vanishingly rare. The mute
+  // capability still exists in the callback handler for any stale buttons, it's
+  // just no longer offered here or as a command.
   return {
     inline_keyboard: [
       [btn("📏 Size", `s:${subId}`), btn("⏱ Every", `e:${subId}`)],
-      [btn("📈 History", `h:${subId}`), paused ? btn("▶️ Resume", `u:${subId}`) : btn("⏸ Pause", `p:${subId}`)],
-      [btn("🗑 Remove", `r:${subId}`), btn("◀︎ Back", "L")],
+      [btn("📈 History", `h:${subId}`), btn("🗑 Remove", `r:${subId}`)],
+      [btn("◀︎ Back", "L")],
     ],
   };
 }

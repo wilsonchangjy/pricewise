@@ -60,9 +60,10 @@ test("removal asks before doing", () => {
   assert.deepEqual(allData(kb), ["R:3", "i:3"]);
 });
 
-test("pause and resume swap, so the button always shows the next action", () => {
-  assert.ok(allData(itemKeyboard(1, { paused: false })).includes("p:1"));
-  assert.ok(allData(itemKeyboard(1, { paused: true })).includes("u:1"));
+test("the item card offers size, every, history, remove — pause/resume retired", () => {
+  const data = allData(itemKeyboard(1));
+  assert.deepEqual(data, ["s:1", "e:1", "h:1", "r:1", "L"]);
+  assert.ok(!data.some((d) => d.startsWith("p:") || d.startsWith("u:")), "no pause/resume button");
 });
 
 test("every-keyboard offers exactly the supported intervals", () => {

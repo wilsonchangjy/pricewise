@@ -25,12 +25,16 @@ test("/setkey flags the message for deletion (it's a secret)", () => {
   assert.equal(r.redactMessage, true);
 });
 
-test("list/remove/pause/help/unknown", () => {
+test("list/remove/help/unknown", () => {
   assert.equal(parseCommand("/list").cmd, "list");
   assert.equal(parseCommand("/remove 2").ref, "2");
-  assert.equal(parseCommand("/pause 1").ref, "1");
   assert.equal(parseCommand("/start").cmd, "help");
   assert.equal(parseCommand("hello there").cmd, "unknown");
+});
+
+test("retired /pause and /resume no longer route — they fall through to unknown", () => {
+  assert.equal(parseCommand("/pause 1").cmd, "unknown");
+  assert.equal(parseCommand("/resume 1").cmd, "unknown");
 });
 
 test("/size takes free text after the item number", () => {
