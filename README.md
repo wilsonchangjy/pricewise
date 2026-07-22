@@ -62,23 +62,25 @@ You ──paste a link──▶ Telegram bot ──▶ Supabase (your list)
 
 ## Using the bot
 
+Most of the bot lives behind two commands. Paste a link to track something, then
+tap it in your list to change anything about it.
+
 | Command | What it does |
 |---|---|
 | paste a URL / `/add <url>` | start tracking an item |
-| `/list` | show your tracked items — tap one to change it |
-| `/size <n> <your size>` | watch one size instead of the whole product |
-| `/every <n> <3h\|6h\|12h\|1d>` | how often to check that item |
-| `/setprice <n> <price>` | alert only at/below a price |
-| `/history <n>` | price history since tracking began |
-| `/pause <n>` · `/resume <n>` | mute / unmute |
-| `/remove <n>` | stop tracking one |
-| `/setsize` · `/setevery` | defaults applied to new items |
-| `/prefs` | your defaults, limits and credit balance |
-| `/setkey <key>` · `/providers` | add an unblocker key for bot-protected stores |
+| `/list` | your items — **tap one** to set its size, a price-drop target, how often it's checked, see its history, or remove it |
+| `/prefs` | your default size and check frequency, limits, and credit balance |
+| `/setkey <key>` | add your own unblocker key for bot-protected stores (`/providers` lists the options) |
+| `/help` | the short version of this |
+
+Everything on an item is a tap, not a command to memorise — the size picker shows
+what the shop actually stocks, and a price target is a preset (−10% / −20% / −30%
+of the current price). Check frequency can be set per item, or in `/prefs` for
+everything at once (or just the bot-protected ones that spend your credits).
 
 Small price moves are ignored on purpose: a drop has to be at least **5% and 2
-currency units** before it's worth interrupting you. A `/setprice` target always
-alerts, however small the step — you asked for that number specifically.
+currency units** before it's worth interrupting you. A price target you set always
+alerts, however small the step.
 
 ## Self-hosting
 
