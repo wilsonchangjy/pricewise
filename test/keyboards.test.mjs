@@ -2,9 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard, confirmRemoveKeyboard,
+  targetKeyboard, setEveryIntervalKeyboard, setEveryScopeKeyboard,
 } from "../supabase/functions/_shared/keyboards.mjs";
 
 const allData = (kb) => kb.inline_keyboard.flat().map((b) => b.callback_data);
+const allText = (kb) => kb.inline_keyboard.flat().map((b) => b.text);
 
 test("callback data stays inside Telegram's 64-byte cap", () => {
   const variants = Array.from({ length: 24 }, (_, i) => ({ id: `519188937-251-${i}`, label: `EU ${36 + i}`, available: true }));
@@ -60,10 +62,30 @@ test("removal asks before doing", () => {
   assert.deepEqual(allData(kb), ["R:3", "i:3"]);
 });
 
-test("the item card offers size, every, history, remove — pause/resume retired", () => {
+test("the item card offers size, every, price, history, remove — pause/resume retired", () => {
   const data = allData(itemKeyboard(1));
-  assert.deepEqual(data, ["s:1", "e:1", "h:1", "r:1", "L"]);
+  assert.deepEqual(data, ["s:1", "e:1", "t:1", "h:1", "r:1", "L"]);
   assert.ok(!data.some((d) => d.startsWith("p:") || d.startsWith("u:")), "no pause/resume button");
+});
+
+test("target presets label the resulting price and encode only the percentage", () => {
+  const kb = targetKeyboard(3, 64, { hasTarget: false });
+  assert.deepEqual(allData(kb), ["T:3:10", "T:3:20", "T:3:30", "i:3"]);
+  assert.ok(allText(kb).includes("−10% (≈57.60)"), "shows the computed target, not just the %");
+  // Clear only appears when there's a target to clear.
+  assert.ok(!allData(kb).includes("T:3:0"));
+  assert.ok(allData(targetKeyboard(3, 64, { hasTarget: true })).includes("T:3:0"), "Clear when a target exists");
+  // With no known price yet, buttons still work but carry no misleading number.
+  assert.ok(!allText(targetKeyboard(3, 0)).some((t) => t.includes("≈")));
+});
+
+test("the /setevery flow: interval picker then scope, payload survives in arg", () => {
+  assert.deepEqual(allData(setEveryIntervalKeyboard()), ["Pi:_:3h", "Pi:_:6h", "Pi:_:12h", "Pi:_:1d", "P"]);
+  // The filler '_' drops out; the interval rides in arg through parseCallback.
+  assert.deepEqual(parseCallback("Pi:_:6h"), { action: "Pi", subId: undefined, arg: "6h" });
+  const scope = setEveryScopeKeyboard("1d");
+  assert.deepEqual(allData(scope), ["Pa:_:1d", "Pd:_:1d", "Pe"]);
+  assert.deepEqual(parseCallback("Pd:_:1d"), { action: "Pd", subId: undefined, arg: "1d" });
 });
 
 test("every-keyboard offers exactly the supported intervals", () => {

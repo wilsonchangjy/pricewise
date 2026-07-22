@@ -67,9 +67,10 @@ export function parseCommand(text) {
       return { cmd: "setsize", category, value: size };
     }
     case "/setevery": {
+      // No argument is fine now — the handler opens an interval picker. An
+      // argument (e.g. /setevery 1d) jumps straight to the scope choice.
       const [value] = rest;
-      if (!value) return { cmd: "setevery", message: "Usage: /setevery <3h|6h|12h|1d> — the default for items you add from now on" };
-      return { cmd: "setevery", value: value.toLowerCase() };
+      return { cmd: "setevery", value: value ? value.toLowerCase() : undefined };
     }
     case "/history":
     case "/price": {

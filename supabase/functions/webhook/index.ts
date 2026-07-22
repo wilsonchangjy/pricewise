@@ -20,7 +20,8 @@ import { matchVariant } from "../_shared/variants.mjs";
 import { PROVIDERS, DEFAULT_PROVIDER, normalizeProvider, detectProvider, providerSummary } from "../_shared/providers.mjs";
 import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard,
-  confirmRemoveKeyboard, backToItemKeyboard,
+  confirmRemoveKeyboard, backToItemKeyboard, targetKeyboard, prefsKeyboard,
+  setEveryIntervalKeyboard, setEveryScopeKeyboard,
 } from "../_shared/keyboards.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -64,21 +65,12 @@ const HELP = [
   "",
   "Paste a product link to start tracking it.",
   "",
-  "/list — your tracked items",
-  "/size <n> <your size> — watch one size instead of the whole product",
-  "/every <n> <3h|6h|12h|1d> — how often to check (6h by default; bot-protected",
-  "   items follow what they cost)",
-  "/history <n> [1m|3m|6m|1y] — price history since I started watching",
-  "",
-  "/prefs — your defaults and limits",
-  "/setsize <tops|bottoms|shoes> <size> — I'll use it on new items automatically",
-  "/setevery <3h|6h|12h|1d> — default check frequency for new items",
-  "/remove <n> — stop tracking one",
-  "/setprice <n> <price> — only alert me at/below this",
-  "/setkey <key> — your own unblocker key for bot-protected stores",
-  "   (I delete that message from the chat the moment I read it)",
-  "/providers — which unblocker services work, and their free tiers",
-  "/help — this message",
+  "/list — your items. Tap one to set its size, a price-drop target, how often I check,",
+  "   to see its price history, or to remove it.",
+  "/prefs — your defaults, limits, and unblocker credits.",
+  "/setkey <key> — add your own unblocker key for bot-protected stores.",
+  "   (I delete that message from the chat the moment I read it — /providers lists the options.)",
+  "/help — this message.",
 ].join("\n");
 
 Deno.serve(async (req) => {
@@ -115,7 +107,7 @@ Deno.serve(async (req) => {
 
 const TIP = "\n\nTip: open the product page in your browser, choose the colour/size, then copy the link straight from the address bar.";
 const ok = () => new Response("ok", { status: 200 });
-const reply = (chatId, text) => sendMessage(BOT_TOKEN, chatId, text);
+const reply = (chatId, text, opts) => sendMessage(BOT_TOKEN, chatId, text, opts);
 
 async function handle(msg, chatId, fromId) {
   // Groups and channels only cause harm here: chat.id != from.id, so one person's
@@ -561,12 +553,14 @@ async function showHistory(user, chatId, ref, range) {
  *  than daily for defended sites (those spend their own unblocker credits). */
 function preferredInterval(user, plan) {
   if (plan.strategy === "unblocker") {
-    // We already know what this shop is likely to cost (ADAPTER_TIER), so start
-    // at the cadence that cost earns. Assuming daily for everything quoted 30
-    // credits/month for a 1-credit shop that should run every 6h — and left it
-    // on a daily clock until the first check corrected it.
+    // Start at the cadence this shop's cost earns (its tier floor), but honour a
+    // defended default if the user set one — always the SLOWER of the two, since
+    // the floor is the fastest we'll spend their credits, and the usual intent
+    // (everything to daily) is slower still.
     const tier = ADAPTER_TIER[plan.adapter] ?? "render";
-    return TIER_INTERVAL_MIN[tier] ?? DEFENDED_INTERVAL_MIN;
+    const floor = TIER_INTERVAL_MIN[tier] ?? DEFENDED_INTERVAL_MIN;
+    const pref = Number(user.settings?.interval_minutes_defended);
+    return Number.isFinite(pref) ? Math.max(floor, pref) : floor;
   }
   const pref = Number(user.settings?.interval_minutes);
   if (!Number.isFinite(pref)) return plan.intervalMinutes;
@@ -576,25 +570,23 @@ function preferredInterval(user, plan) {
 const intervalWord = (min) =>
   Object.entries(INTERVAL_OPTIONS).find(([, v]) => v === Number(min))?.[0] ?? `${min}min`;
 
-async function showPrefs(user, chatId) {
+async function buildPrefsText(user) {
   const sizes = user.settings?.sizes ?? {};
   const every = intervalWord(user.settings?.interval_minutes ?? FREE_INTERVAL_MIN);
+  const everyDefended = user.settings?.interval_minutes_defended;
   const { count } = await db.from("subscriptions")
     .select("id", { count: "exact", head: true }).eq("user_id", user.id);
   const { data: keyRow } = await db.from("user_api_keys")
     .select("provider, credits_remaining, credits_seen_at").eq("user_id", user.id).maybeSingle();
 
-  const sizeLines = CATEGORIES.map(
-    (c) => `• ${c}: ${sizes[c] ? sizes[c] : "not set"}`,
-  );
+  const sizeLines = CATEGORIES.map((c) => `• ${c}: ${sizes[c] ? sizes[c] : "not set"}`);
 
-  return reply(chatId, [
+  return [
     "⚙️ Your defaults",
     ...sizeLines,
-    `• check every: ${every}`,
+    `• check every: ${every}${everyDefended ? ` (bot-protected: ${intervalWord(everyDefended)})` : ""}`,
     "",
-    "Set them with /setsize shoes UK9 · /setevery 6h",
-    "New items pick these up automatically when I can tell what kind of thing they are.",
+    "Set default sizes with /setsize shoes UK9. Use the button below to change how often I check.",
     "",
     "📏 Limits",
     `• ${count ?? 0}/${MAX_ITEMS} items on your list`,
@@ -608,7 +600,84 @@ async function showPrefs(user, chatId) {
       : keyRow
       ? ["", `🔑 ${PROVIDERS[keyRow.provider]?.label ?? keyRow.provider} key saved`]
       : []),
-  ].join("\n"));
+  ].join("\n");
+}
+
+async function showPrefs(user, chatId) {
+  return reply(chatId, await buildPrefsText(user), { keyboard: prefsKeyboard() });
+}
+
+/** The /prefs screen re-rendered in place (the ◀︎ Back target of the frequency flow). */
+async function renderPrefs(user, chatId, messageId, cqId) {
+  if (cqId) await answerCallback(BOT_TOKEN, cqId);
+  return editMessage(BOT_TOKEN, chatId, messageId, await buildPrefsText(user), { keyboard: prefsKeyboard() });
+}
+
+// ── /setevery: pick an interval, then choose which items it applies to ───────
+
+function showEveryInterval(chatId, messageId, cqId) {
+  return answerCallback(BOT_TOKEN, cqId).then(() =>
+    editMessage(BOT_TOKEN, chatId, messageId,
+      "⏱ How often should I check?\n\nFastest is 3h — shops rarely move quicker, and checking harder mostly earns blocks. Bot-protected shops spend your own credits, so slower is cheaper there.",
+      { keyboard: setEveryIntervalKeyboard() }));
+}
+
+function showEveryScope(chatId, messageId, cqId, interval) {
+  if (!INTERVAL_OPTIONS[interval]) return answerCallback(BOT_TOKEN, cqId);
+  return answerCallback(BOT_TOKEN, cqId).then(() =>
+    editMessage(BOT_TOKEN, chatId, messageId,
+      `⏱ Check every ${interval} — which items?\n\n• All items — everything on your list, and new ones.\n• Only bot-protected — just the ones that spend your unblocker credits.`,
+      { keyboard: setEveryScopeKeyboard(interval) }));
+}
+
+/**
+ * Apply a chosen interval to a scope AND make it the default for new items in
+ * that scope. "def" touches only bot-protected items (the ones that cost the
+ * user credits); "all" touches everything. Each item is floored — a defended
+ * item can't be driven faster than its tier allows — but setting things slower
+ * (the usual intent: everything to daily to save credits) is always fine.
+ */
+async function applyDefaultEvery(user, chatId, messageId, cqId, scope, interval) {
+  const minutes = INTERVAL_OPTIONS[interval];
+  if (!minutes) return answerCallback(BOT_TOKEN, cqId);
+
+  // "def" sets only the bot-protected default; "all" sets both, so new items of
+  // either kind inherit it (defended is floored per-tier at use time anyway).
+  const newSettings = scope === "def"
+    ? { ...(user.settings ?? {}), interval_minutes_defended: minutes }
+    : { ...(user.settings ?? {}), interval_minutes: minutes, interval_minutes_defended: minutes };
+  await db.from("users").update({ settings: newSettings }).eq("id", user.id);
+  user.settings = newSettings;
+
+  const { data: subs } = await db.from("subscriptions")
+    .select("id, tracked_products(id, adapter, fetch_strategy)")
+    .eq("user_id", user.id).eq("status", "active");
+  const inScope = (subs ?? []).filter(
+    (s) => scope === "all" || s.tracked_products?.fetch_strategy === "unblocker");
+
+  const affected = new Set();
+  for (const s of inScope) {
+    const floored = Math.max(defendedFloor(s.tracked_products), minutes);
+    await db.from("subscriptions").update({ interval_minutes: floored }).eq("id", s.id);
+    affected.add(s.tracked_products.id);
+  }
+  for (const pid of affected) await recomputeProductInterval(pid);
+
+  await answerCallback(BOT_TOKEN, cqId, "Saved");
+  const scopeWord = scope === "def" ? "bot-protected items" : "items";
+  const note = affected.size
+    ? `Set your ${affected.size} ${scopeWord} to every ${interval}, and new ${scope === "def" ? "bot-protected " : ""}ones will default to that.`
+    : `New ${scope === "def" ? "bot-protected " : ""}items will default to every ${interval}. (You have none to update yet.)`;
+  return editMessage(BOT_TOKEN, chatId, messageId, `⏱️ ${note}`, { keyboard: prefsKeyboard() });
+}
+
+/** A product's cadence is the fastest any of its watchers asked for. */
+async function recomputeProductInterval(productId) {
+  const { data: all } = await db.from("subscriptions")
+    .select("interval_minutes").eq("product_id", productId).eq("status", "active");
+  const effective = Math.max(MIN_INTERVAL_MIN,
+    Math.min(...(all ?? []).map((x) => x.interval_minutes ?? FREE_INTERVAL_MIN), FREE_INTERVAL_MIN));
+  await db.from("tracked_products").update({ check_interval_minutes: effective }).eq("id", productId);
 }
 
 async function setDefaultSize(user, chatId, categoryWord, size) {
@@ -626,18 +695,17 @@ async function setDefaultSize(user, chatId, categoryWord, size) {
   ].join("\n"));
 }
 
+/** /setevery launches the interval→scope flow. A valid interval argument skips
+ *  straight to the scope choice; otherwise the interval picker opens first. */
 async function setDefaultEvery(user, chatId, value) {
-  const minutes = INTERVAL_OPTIONS[value];
-  if (!minutes) return reply(chatId, `Choose one of: ${Object.keys(INTERVAL_OPTIONS).join(", ")} — e.g. /setevery 6h`);
-  await db.from("users").update({
-    settings: { ...(user.settings ?? {}), interval_minutes: minutes },
-  }).eq("id", user.id);
-  return reply(chatId, [
-    `⏱️ New items will be checked every ${value}.`,
-    minutes <= MIN_INTERVAL_MIN
-      ? "That's the fastest I go. Shops rarely move faster, and hammering them earns blocks, not earlier alerts."
-      : "Change any single item with /every.",
-  ].join("\n"));
+  if (value && INTERVAL_OPTIONS[value]) {
+    return reply(chatId,
+      `⏱ Check every ${value} — which items?\n\n• All items — everything on your list, and new ones.\n• Only bot-protected — just the ones that spend your unblocker credits.`,
+      { keyboard: setEveryScopeKeyboard(value) });
+  }
+  return reply(chatId,
+    "⏱ How often should I check?\n\nPick an interval, then choose whether it applies to everything or only the bot-protected items that spend your credits.",
+    { keyboard: setEveryIntervalKeyboard() });
 }
 
 // ── inline keyboard handling ────────────────────────────────────────────────
@@ -660,6 +728,16 @@ async function handleCallback(cq) {
 
   if (action === "L") return renderList(user, chatId, messageId, cq.id);
 
+  // Prefs / default-frequency flow — these carry no subscription, so they must
+  // be handled before the per-item ownership lookup below.
+  switch (action) {
+    case "P":  return renderPrefs(user, chatId, messageId, cq.id);
+    case "Pe": return showEveryInterval(chatId, messageId, cq.id);
+    case "Pi": return showEveryScope(chatId, messageId, cq.id, arg);
+    case "Pa": return applyDefaultEvery(user, chatId, messageId, cq.id, "all", arg);
+    case "Pd": return applyDefaultEvery(user, chatId, messageId, cq.id, "def", arg);
+  }
+
   const sub = subId === undefined ? null : await ownedSub(user.id, subId);
   if (!sub) {
     await answerCallback(BOT_TOKEN, cq.id, "That item isn't on your list any more.");
@@ -676,6 +754,8 @@ async function handleCallback(cq) {
         `⏱ How often should I check ${sub.tracked_products.title}?\n\nFastest is 3h — shops rarely move quicker, and checking harder mostly earns blocks.`,
         { keyboard: everyKeyboard(sub.id) });
     case "E": return applyEvery(sub, chatId, messageId, cq.id, arg);
+    case "t": return showTarget(sub, chatId, messageId, cq.id);
+    case "T": return applyTarget(sub, chatId, messageId, cq.id, arg);
     case "h": return renderHistory(sub, chatId, messageId, cq.id);
     case "p":
     case "u": {
@@ -811,6 +891,41 @@ async function applyEvery(sub, chatId, messageId, cqId, value) {
   await db.from("tracked_products").update({ check_interval_minutes: effective }).eq("id", p.id);
 
   await answerCallback(BOT_TOKEN, cqId, `Every ${value}`);
+  return renderItem(sub, chatId, messageId);
+}
+
+async function showTarget(sub, chatId, messageId, cqId) {
+  const p = sub.tracked_products;
+  const ref = Number(sub.last_alert_price);
+  if (!(ref > 0)) {
+    // No price to anchor presets to yet — offer the typed escape hatch instead.
+    await answerCallback(BOT_TOKEN, cqId, "I haven't read a price yet — try again after the next check.");
+    return renderItem(sub, chatId, messageId);
+  }
+  await answerCallback(BOT_TOKEN, cqId);
+  const now = `Last seen at ${ref}.`;
+  const line = sub.target_price != null ? `Alerting below ${sub.target_price}.` : "No target set.";
+  return editMessage(BOT_TOKEN, chatId, messageId,
+    `🎯 Alert me when ${p.title} drops to…\n${now} ${line}`,
+    { keyboard: targetKeyboard(sub.id, ref, { hasTarget: sub.target_price != null }) });
+}
+
+async function applyTarget(sub, chatId, messageId, cqId, arg) {
+  const pct = Number(arg);
+  if (pct === 0) {
+    await db.from("subscriptions").update({ target_price: null }).eq("id", sub.id);
+    sub.target_price = null;
+    await answerCallback(BOT_TOKEN, cqId, "Target cleared");
+    return renderItem(sub, chatId, messageId);
+  }
+  const ref = Number(sub.last_alert_price);
+  if (!(ref > 0) || !Number.isFinite(pct)) return answerCallback(BOT_TOKEN, cqId);
+  // Recompute from the LIVE price, not the number baked into the button, so a
+  // stale menu can't set a target off an out-of-date price.
+  const target = Math.round(ref * (1 - pct / 100) * 100) / 100;
+  await db.from("subscriptions").update({ target_price: target }).eq("id", sub.id);
+  sub.target_price = target;
+  await answerCallback(BOT_TOKEN, cqId, `Alerting below ${target}`);
   return renderItem(sub, chatId, messageId);
 }
 

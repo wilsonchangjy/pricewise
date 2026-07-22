@@ -44,8 +44,56 @@ export function itemKeyboard(subId) {
   return {
     inline_keyboard: [
       [btn("📏 Size", `s:${subId}`), btn("⏱ Every", `e:${subId}`)],
-      [btn("📈 History", `h:${subId}`), btn("🗑 Remove", `r:${subId}`)],
-      [btn("◀︎ Back", "L")],
+      [btn("🎯 Price", `t:${subId}`), btn("📈 History", `h:${subId}`)],
+      [btn("🗑 Remove", `r:${subId}`), btn("◀︎ Back", "L")],
+    ],
+  };
+}
+
+/** Preset drop targets, as a % below the last price we saw. No typing needed —
+ *  the reference price only labels the buttons; the handler recomputes from the
+ *  live price so a stale button can't set a target off an out-of-date number. */
+export function targetKeyboard(subId, refPrice, { hasTarget = false } = {}) {
+  const label = (pct) => {
+    const at = refPrice > 0 ? ` (≈${(refPrice * (1 - pct / 100)).toFixed(2)})` : "";
+    return `−${pct}%${at}`;
+  };
+  return {
+    inline_keyboard: [
+      [btn(label(10), `T:${subId}:10`), btn(label(20), `T:${subId}:20`)],
+      [btn(label(30), `T:${subId}:30`), ...(hasTarget ? [btn("✖️ Clear", `T:${subId}:0`)] : [])],
+      [btn("◀︎ Back", `i:${subId}`)],
+    ],
+  };
+}
+
+// ── /prefs and the /setevery scope flow ─────────────────────────────────────
+// These carry no subscription id, so their payload rides in the ARG slot with a
+// filler in the subId position ("Pi:_:6h"): parseCallback keeps only an integer
+// subId, so "_" drops out and "6h" survives as arg. They're dispatched BEFORE
+// the per-item ownership lookup, alongside "L".
+
+export function prefsKeyboard() {
+  return { inline_keyboard: [[btn("⏱ Check frequency", "Pe")]] };
+}
+
+/** Step 1 of /setevery: pick an interval. */
+export function setEveryIntervalKeyboard() {
+  return {
+    inline_keyboard: [
+      ["3h", "6h", "12h", "1d"].map((v) => btn(v, `Pi:_:${v}`)),
+      [btn("◀︎ Back", "P")],
+    ],
+  };
+}
+
+/** Step 2: which items should that interval apply to? */
+export function setEveryScopeKeyboard(interval) {
+  return {
+    inline_keyboard: [
+      [btn("All items", `Pa:_:${interval}`)],
+      [btn("Only bot-protected", `Pd:_:${interval}`)],
+      [btn("◀︎ Back", "Pe")],
     ],
   };
 }
