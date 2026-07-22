@@ -40,6 +40,32 @@ export function monthlyCredits(tier, intervalMinutes) {
   return Math.round(cost * checksPerMonth);
 }
 
+// A never-baselined item that failed retries at this cadence instead of backing
+// off — fast enough that a first reading lands within the hour, cheap enough
+// that the extra check barely dents a credit budget.
+export const BASELINE_RETRY_MIN = 30;
+
+/**
+ * When should a FAILED product be checked again, in minutes from now?
+ *
+ * An item that has read successfully before and just broke gets EXPONENTIAL
+ * backoff — no point hammering a source that's down. But an item that has never
+ * produced a reading (`hasBaseline` false) has a user waiting for its very first
+ * one, and backing off there means a single transient blip on the first check
+ * delays the baseline for hours. (A real case: an Amazon book soft-failed once
+ * on check #1 and the 6h interval x2 pushed its baseline 12 hours out.)
+ *
+ * So before a baseline exists we retry at a short FIXED cadence, still counting
+ * failures toward the give-up threshold so a genuinely unreadable item is parked
+ * on schedule rather than retried forever.
+ *
+ * Pure so it can be tested without a database.
+ */
+export function nextCheckDelayMinutes(intervalMinutes, failures, hasBaseline) {
+  if (!hasBaseline) return Math.min(intervalMinutes, BASELINE_RETRY_MIN);
+  return intervalMinutes * Math.min(2 ** failures, 8);
+}
+
 // What /every accepts. 3h is the floor because a shop that sells out inside
 // three hours is rare, and polling faster mostly buys bans, not saves.
 export const INTERVAL_OPTIONS = { "3h": 180, "6h": 360, "12h": 720, "1d": 1440 };

@@ -13,7 +13,7 @@ import { sendMessage, isUnreachable } from "../_shared/telegram.mjs";
 import { contextLine } from "../_shared/history.mjs";
 import { matchVariant } from "../_shared/variants.mjs";
 import { verifyPrice } from "../_shared/verify.mjs";
-import { TIER_INTERVAL_MIN } from "../_shared/policy.mjs";
+import { TIER_INTERVAL_MIN, nextCheckDelayMinutes } from "../_shared/policy.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const BATCH_SIZE = Number(Deno.env.get("CHECK_BATCH_SIZE") ?? 20);
@@ -436,7 +436,9 @@ async function noteCredits(userId, remaining, subs) {
 /** Exponential back-off; a persistently broken URL is parked, not retried forever. */
 async function recordFailure(product, message, kind = "error", subs = null) {
   const failures = (product.consecutive_failures ?? 0) + 1;
-  const backoff = product.check_interval_minutes * Math.min(2 ** failures, 8);
+  // Never-baselined items retry soon instead of backing off — a first reading is
+  // something the user is actively waiting for. See nextCheckDelayMinutes.
+  const backoff = nextCheckDelayMinutes(product.check_interval_minutes, failures, !!product.last_ok_at);
   console.warn(`product ${product.id} (${product.adapter}) failed x${failures}: ${message}`);
 
   // Silence is the one thing a watcher must never do. Speak up once when we start
