@@ -14,7 +14,10 @@ defended sites are opt-in per user (their own key).
 3. **Enable extensions** (Database → Extensions): `pg_cron`, and `pgsodium` **or**
    Vault (for encrypting users' ScrapingBee keys).
 4. **Bot:** reuse the existing @BotFather bot, or make a fresh one for the public
-   build → note the token.
+   build → note the token. Register the slash-command menu with
+   `TELEGRAM_BOT_TOKEN=… ./scripts/set-telegram-commands.sh` — that list lives on
+   Telegram's servers, not in the code, so it's the one thing a code deploy won't
+   update. Re-run it whenever the command set changes.
 5. **Public repo (optional now):** create an empty GitHub repo. When the code's
    ready I'll extract `phase1/` into it (clean history, MIT license) — nothing
    personal is in the code.
