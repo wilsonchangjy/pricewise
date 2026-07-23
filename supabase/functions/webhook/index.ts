@@ -22,6 +22,7 @@ import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard,
   confirmRemoveKeyboard, backToItemKeyboard, targetKeyboard, prefsKeyboard,
   setEveryIntervalKeyboard, setEveryScopeKeyboard, prefsSizeCategoryKeyboard,
+  colourKeyboard, variantColours,
 } from "../_shared/keyboards.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -792,6 +793,7 @@ async function handleCallback(cq) {
   switch (action) {
     case "i": return renderItem(sub, chatId, messageId, cq.id);
     case "s": return renderSizes(sub, chatId, messageId, cq.id);
+    case "cc": return renderSizesForColour(sub, chatId, messageId, cq.id, arg);
     case "S": return applySize(sub, chatId, messageId, cq.id, arg);
     case "e":
       await answerCallback(BOT_TOKEN, cq.id);
@@ -849,6 +851,14 @@ async function renderList(user, chatId, messageId, cqId) {
     { keyboard: listKeyboard(subs) });
 }
 
+/** The most recent reading's variants for a product (id/label/state/etc.). */
+async function latestVariants(productId) {
+  const { data } = await db.from("product_readings")
+    .select("variants").eq("product_id", productId)
+    .order("checked_at", { ascending: false }).limit(1);
+  return (data?.[0]?.variants ?? []).filter((v) => v && v.label);
+}
+
 async function renderItem(sub, chatId, messageId, cqId) {
   if (cqId) await answerCallback(BOT_TOKEN, cqId);
   const p = sub.tracked_products;
@@ -860,26 +870,48 @@ async function renderItem(sub, chatId, messageId, cqId) {
     sub.status === "paused" ? "Currently muted" : null,
   ].filter(Boolean);
 
+  // Nothing to pick on a single-option item, so don't offer the Size button.
+  const showSize = (await latestVariants(p.id)).length > 1;
   return editMessage(BOT_TOKEN, chatId, messageId, `${p.title}\n${bits.join("\n")}\n${p.url}`,
-    { keyboard: itemKeyboard(sub.id) });
+    { keyboard: itemKeyboard(sub.id, { showSize }) });
 }
 
-/** The point of the whole feature: pick from what the shop ACTUALLY offers. */
+/** The point of the whole feature: pick from what the shop ACTUALLY offers.
+ *  Colours first when there's more than one — otherwise a multi-colour item
+ *  becomes a wall of identical-looking "colour X / size …" buttons. */
 async function renderSizes(sub, chatId, messageId, cqId) {
   const p = sub.tracked_products;
-  const { data: rows } = await db.from("product_readings")
-    .select("variants").eq("product_id", p.id)
-    .order("checked_at", { ascending: false }).limit(1);
-  const variants = (rows?.[0]?.variants ?? []).filter((v) => v && v.label);
+  const variants = await latestVariants(p.id);
 
-  if (!variants.length) {
-    await answerCallback(BOT_TOKEN, cqId, "I haven't read this one yet — try again after the next check.");
+  if (variants.length <= 1) {
+    await answerCallback(BOT_TOKEN, cqId,
+      variants.length ? "This item has just one option — nothing to pick." : "I haven't read this one yet — try again after the next check.");
     return renderItem(sub, chatId, messageId);
   }
   await answerCallback(BOT_TOKEN, cqId);
+
+  if (variantColours(variants).length > 1) {
+    return editMessage(BOT_TOKEN, chatId, messageId,
+      `🎨 Which colour of ${p.title}?`,
+      { keyboard: colourKeyboard(sub.id, variants, sub.variant_id) });
+  }
   return editMessage(BOT_TOKEN, chatId, messageId,
     `📏 Which size of ${p.title}?\n✖️ = sold out right now (still worth watching — that's the point).`,
     { keyboard: sizeKeyboard(sub.id, variants, sub.variant_id) });
+}
+
+/** The sizes of one colour, reached from the colour picker. */
+async function renderSizesForColour(sub, chatId, messageId, cqId, colorCode) {
+  const p = sub.tracked_products;
+  const variants = (await latestVariants(p.id)).filter((v) => String(v.colorCode) === String(colorCode));
+  if (!variants.length) {
+    await answerCallback(BOT_TOKEN, cqId, "That colour isn't listed any more.");
+    return renderSizes(sub, chatId, messageId, cqId);
+  }
+  await answerCallback(BOT_TOKEN, cqId);
+  return editMessage(BOT_TOKEN, chatId, messageId,
+    `📏 colour ${colorCode} — which size?\n✖️ = sold out right now (still worth watching).`,
+    { keyboard: sizeKeyboard(sub.id, variants, sub.variant_id, { back: `s:${sub.id}`, includeAny: false }) });
 }
 
 async function applySize(sub, chatId, messageId, cqId, variantId) {

@@ -4,6 +4,7 @@ import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard, confirmRemoveKeyboard,
   targetKeyboard, setEveryIntervalKeyboard, setEveryScopeKeyboard,
   prefsKeyboard, prefsSizeCategoryKeyboard,
+  colourKeyboard, variantColours, variantSizeLabel,
 } from "../supabase/functions/_shared/keyboards.mjs";
 
 const allData = (kb) => kb.inline_keyboard.flat().map((b) => b.callback_data);
@@ -67,6 +68,30 @@ test("the item card offers size, every, price, history, remove — pause/resume 
   const data = allData(itemKeyboard(1));
   assert.deepEqual(data, ["s:1", "e:1", "t:1", "h:1", "r:1", "L"]);
   assert.ok(!data.some((d) => d.startsWith("p:") || d.startsWith("u:")), "no pause/resume button");
+});
+
+test("the Size button is hidden for a single-option item", () => {
+  const data = allData(itemKeyboard(1, { showSize: false }));
+  assert.ok(!data.includes("s:1"), "no size button when there's nothing to pick");
+  assert.deepEqual(data, ["e:1", "t:1", "h:1", "r:1", "L"]);
+});
+
+test("size buttons show the size alone — the redundant colour prefix is stripped", () => {
+  assert.equal(variantSizeLabel({ label: "colour 69 / size 027", sizeCode: "027" }), "size 027");
+  assert.equal(variantSizeLabel({ label: "M" }), "M");
+  assert.equal(variantSizeLabel({ label: "colour 01 / size 002" }), "size 002");
+  const kb = sizeKeyboard(5, [{ id: "a", label: "colour 69 / size 027", available: true }], null);
+  assert.ok(kb.inline_keyboard.flat().some((b) => b.text.includes("size 027") && !b.text.includes("colour")));
+});
+
+test("colour picker appears only when colours vary, and leads into the size list", () => {
+  const oneColour = [{ id: "a", label: "colour 69 / size 027", colorCode: "69" }, { id: "b", label: "colour 69 / size 028", colorCode: "69" }];
+  const multi = [{ id: "a", label: "colour 01 / size 002", colorCode: "01" }, { id: "b", label: "colour 04 / size 002", colorCode: "04" }];
+  assert.deepEqual(variantColours(oneColour), ["69"]);
+  assert.deepEqual(variantColours(multi), ["01", "04"]);
+  // Each colour routes to cc:<sub>:<colour>; "Any" still watches everything.
+  const kb = colourKeyboard(7, multi, null);
+  assert.deepEqual(allData(kb), ["cc:7:01", "cc:7:04", "S:7:*", "i:7"]);
 });
 
 test("target presets label the resulting price and encode only the percentage", () => {

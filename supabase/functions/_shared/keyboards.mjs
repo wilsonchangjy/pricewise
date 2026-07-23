@@ -36,14 +36,15 @@ export function listKeyboard(subs) {
   return { inline_keyboard: rows.slice(0, MAX_BUTTON_ROWS) };
 }
 
-/** The per-item action menu. */
-export function itemKeyboard(subId) {
-  // Pause/Resume was retired — the use case proved vanishingly rare. The mute
-  // capability still exists in the callback handler for any stale buttons, it's
-  // just no longer offered here or as a command.
+/** The per-item action menu. The Size button is hidden for items with a single
+ *  option (one size, one variant) — there'd be nothing to pick. */
+export function itemKeyboard(subId, { showSize = true } = {}) {
+  const row1 = showSize
+    ? [btn("📏 Size", `s:${subId}`), btn("⏱ Every", `e:${subId}`)]
+    : [btn("⏱ Every", `e:${subId}`)];
   return {
     inline_keyboard: [
-      [btn("📏 Size", `s:${subId}`), btn("⏱ Every", `e:${subId}`)],
+      row1,
       [btn("🎯 Price", `t:${subId}`), btn("📈 History", `h:${subId}`)],
       [btn("🗑 Remove", `r:${subId}`), btn("◀︎ Back", "L")],
     ],
@@ -112,23 +113,62 @@ export function setEveryScopeKeyboard(interval) {
   };
 }
 
+/** A button's size text — just the size, with any leading "colour X / " dropped
+ *  (it's redundant on the size picker, and it was pushing the size off-screen). */
+export function variantSizeLabel(v) {
+  const stripped = String(v?.label ?? "").replace(/^colou?r\s+\S+\s*[/·]\s*/i, "").trim();
+  return stripped || String(v?.sizeCode ?? v?.id ?? "?");
+}
+
+/** Distinct colour codes in first-seen order — empty when the item has no colour
+ *  dimension (most stores: the size IS the whole label). */
+export function variantColours(variants) {
+  const seen = [];
+  for (const v of variants ?? []) {
+    const c = v?.colorCode;
+    if (c != null && c !== "" && !seen.includes(String(c))) seen.push(String(c));
+  }
+  return seen;
+}
+
 /**
  * The size picker — the reason this feature exists. Instead of guessing what to
- * type, the user sees exactly what the shop offers, with stock marked.
+ * type, the user sees exactly what the shop offers, with stock marked. Labels
+ * show the size alone; when an item spans several colours the caller filters to
+ * one colour first (colourKeyboard) so this list stays short and legible.
  */
-export function sizeKeyboard(subId, variants, currentVariantId) {
+export function sizeKeyboard(subId, variants, currentVariantId, { back = `i:${subId}`, includeAny = true } = {}) {
   const rows = [];
-  const usable = (variants ?? []).filter((v) => v && v.label).slice(0, 24);
+  const usable = (variants ?? []).filter((v) => v && v.label).slice(0, 30);
   for (let i = 0; i < usable.length; i += 3) {
     rows.push(
       usable.slice(i, i + 3).map((v) => {
         const chosen = currentVariantId && String(v.id) === String(currentVariantId);
         const mark = chosen ? "✅ " : v.available ? "" : "✖️ ";
-        return btn(`${mark}${short(v.label)}`, `S:${subId}:${v.id}`);
+        return btn(`${mark}${short(variantSizeLabel(v), 16)}`, `S:${subId}:${v.id}`);
       }),
     );
   }
-  rows.push([btn("Any size", `S:${subId}:*`), btn("◀︎ Back", `i:${subId}`)]);
+  const footer = [];
+  if (includeAny) footer.push(btn("Any size", `S:${subId}:*`));
+  footer.push(btn("◀︎ Back", back));
+  rows.push(footer);
+  return { inline_keyboard: rows };
+}
+
+/** Shown only when an item has more than one colour: pick the colour, then its
+ *  sizes. Keeps a 4-colour × 7-size item from becoming 28 look-alike buttons. */
+export function colourKeyboard(subId, variants, currentVariantId) {
+  const colours = variantColours(variants);
+  const current = currentVariantId
+    ? String((variants.find((v) => String(v.id) === String(currentVariantId)) || {}).colorCode ?? "")
+    : "";
+  const rows = [];
+  for (let i = 0; i < colours.length; i += 2) {
+    rows.push(colours.slice(i, i + 2).map((c) =>
+      btn(`${c === current ? "✅ " : ""}colour ${c}`, `cc:${subId}:${c}`)));
+  }
+  rows.push([btn("Any colour & size", `S:${subId}:*`), btn("◀︎ Back", `i:${subId}`)]);
   return { inline_keyboard: rows };
 }
 
