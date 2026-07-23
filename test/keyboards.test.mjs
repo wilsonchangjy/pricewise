@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard, confirmRemoveKeyboard,
   targetKeyboard, setEveryIntervalKeyboard, setEveryScopeKeyboard,
+  prefsKeyboard, prefsSizeCategoryKeyboard,
 } from "../supabase/functions/_shared/keyboards.mjs";
 
 const allData = (kb) => kb.inline_keyboard.flat().map((b) => b.callback_data);
@@ -79,13 +80,20 @@ test("target presets label the resulting price and encode only the percentage", 
   assert.ok(!allText(targetKeyboard(3, 0)).some((t) => t.includes("≈")));
 });
 
-test("the /setevery flow: interval picker then scope, payload survives in arg", () => {
+test("the /setevery flow: interval picker then three scopes, payload survives in arg", () => {
   assert.deepEqual(allData(setEveryIntervalKeyboard()), ["Pi:_:3h", "Pi:_:6h", "Pi:_:12h", "Pi:_:1d", "P"]);
   // The filler '_' drops out; the interval rides in arg through parseCallback.
   assert.deepEqual(parseCallback("Pi:_:6h"), { action: "Pi", subId: undefined, arg: "6h" });
-  const scope = setEveryScopeKeyboard("1d");
-  assert.deepEqual(allData(scope), ["Pa:_:1d", "Pd:_:1d", "Pe"]);
-  assert.deepEqual(parseCallback("Pd:_:1d"), { action: "Pd", subId: undefined, arg: "1d" });
+  // Free / Bot-protected / Both — free and defended can be tuned independently.
+  assert.deepEqual(allData(setEveryScopeKeyboard("1d")), ["Pf:_:1d", "Pd:_:1d", "Pa:_:1d", "Pe"]);
+  assert.deepEqual(parseCallback("Pf:_:1d"), { action: "Pf", subId: undefined, arg: "1d" });
+});
+
+test("/prefs offers both default-sizes and check-frequency, and the size flow picks a category", () => {
+  assert.deepEqual(allData(prefsKeyboard()), ["Ps", "Pe"]);
+  assert.deepEqual(allData(prefsSizeCategoryKeyboard(["tops", "bottoms", "shoes"])),
+    ["Pc:_:tops", "Pc:_:bottoms", "Pc:_:shoes", "P"]);
+  assert.deepEqual(parseCallback("Pc:_:shoes"), { action: "Pc", subId: undefined, arg: "shoes" });
 });
 
 test("every-keyboard offers exactly the supported intervals", () => {

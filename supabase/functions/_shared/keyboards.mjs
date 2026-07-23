@@ -74,7 +74,19 @@ export function targetKeyboard(subId, refPrice, { hasTarget = false } = {}) {
 // the per-item ownership lookup, alongside "L".
 
 export function prefsKeyboard() {
-  return { inline_keyboard: [[btn("⏱ Check frequency", "Pe")]] };
+  return { inline_keyboard: [[btn("📏 Default sizes", "Ps"), btn("⏱ Check frequency", "Pe")]] };
+}
+
+/** Default-size flow: pick the category, then the bot asks you to type the size
+ *  (sizes are free-form — UK9, M, 32 — so there's no sensible preset). */
+export function prefsSizeCategoryKeyboard(categories) {
+  const emoji = { tops: "👕", bottoms: "👖", shoes: "👟" };
+  return {
+    inline_keyboard: [
+      (categories ?? []).map((c) => btn(`${emoji[c] ?? ""} ${c}`.trim(), `Pc:_:${c}`)),
+      [btn("◀︎ Back", "P")],
+    ],
+  };
 }
 
 /** Step 1 of /setevery: pick an interval. */
@@ -87,12 +99,14 @@ export function setEveryIntervalKeyboard() {
   };
 }
 
-/** Step 2: which items should that interval apply to? */
+/** Step 2: which items should that interval apply to? Three scopes so the free
+ *  and bot-protected (credit-spending) items can be tuned independently. */
 export function setEveryScopeKeyboard(interval) {
   return {
     inline_keyboard: [
-      [btn("All items", `Pa:_:${interval}`)],
-      [btn("Only bot-protected", `Pd:_:${interval}`)],
+      [btn("Free items", `Pf:_:${interval}`)],
+      [btn("Bot-protected", `Pd:_:${interval}`)],
+      [btn("Both", `Pa:_:${interval}`)],
       [btn("◀︎ Back", "Pe")],
     ],
   };

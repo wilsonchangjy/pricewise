@@ -21,7 +21,7 @@ import { PROVIDERS, DEFAULT_PROVIDER, normalizeProvider, detectProvider, provide
 import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard,
   confirmRemoveKeyboard, backToItemKeyboard, targetKeyboard, prefsKeyboard,
-  setEveryIntervalKeyboard, setEveryScopeKeyboard,
+  setEveryIntervalKeyboard, setEveryScopeKeyboard, prefsSizeCategoryKeyboard,
 } from "../_shared/keyboards.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -142,6 +142,16 @@ async function handle(msg, chatId, fromId) {
   }
   if (!user.is_allowed) {
     return reply(chatId, `Pricewise is invite-only right now. Your Telegram ID is ${fromId} — ask the owner to add you.`);
+  }
+
+  // Awaiting a default size? The next plain message is that size. A command or a
+  // link means they moved on, so drop the pending state and let it route normally.
+  const pending = user.settings?.pending;
+  if (pending?.action === "setsize") {
+    const text = (msg.text ?? "").trim();
+    const looksLikeSize = text && !text.startsWith("/") && !/https?:\/\//i.test(text) && text.length <= 20;
+    await clearPending(user);
+    if (looksLikeSize) return setDefaultSize(user, chatId, pending.category, text);
   }
 
   // Parser-level usage errors ("Which one?", "Usage: …").
@@ -607,10 +617,41 @@ async function showPrefs(user, chatId) {
   return reply(chatId, await buildPrefsText(user), { keyboard: prefsKeyboard() });
 }
 
-/** The /prefs screen re-rendered in place (the ◀︎ Back target of the frequency flow). */
+/** The /prefs screen re-rendered in place (the ◀︎ Back target of the flows). */
 async function renderPrefs(user, chatId, messageId, cqId) {
   if (cqId) await answerCallback(BOT_TOKEN, cqId);
   return editMessage(BOT_TOKEN, chatId, messageId, await buildPrefsText(user), { keyboard: prefsKeyboard() });
+}
+
+// ── /prefs → default sizes: pick a category, then TYPE the size ──────────────
+// Sizes are free-form (UK9, M, 32), so there's no preset to tap. Choosing a
+// category parks a `pending` marker in the user's settings; their next plain
+// message is captured as the size (see the pending check in handle()).
+
+function showPrefsSizes(chatId, messageId, cqId) {
+  return answerCallback(BOT_TOKEN, cqId).then(() =>
+    editMessage(BOT_TOKEN, chatId, messageId,
+      "📏 Which category's default size?\nI apply it to new items I can recognise as that kind of thing — never anything already on your list.",
+      { keyboard: prefsSizeCategoryKeyboard(CATEGORIES) }));
+}
+
+async function promptDefaultSize(user, chatId, messageId, cqId, category) {
+  if (!CATEGORIES.includes(category)) return answerCallback(BOT_TOKEN, cqId);
+  const settings = { ...(user.settings ?? {}), pending: { action: "setsize", category } };
+  user.settings = settings;
+  await db.from("users").update({ settings }).eq("id", user.id);
+  await answerCallback(BOT_TOKEN, cqId);
+  return editMessage(BOT_TOKEN, chatId, messageId,
+    `📏 Send me your ${category} size — e.g. M, 32, or UK9.\n(Or /prefs to cancel.)`);
+}
+
+/** Drop a parked input marker (they typed the size, or moved on). */
+async function clearPending(user) {
+  if (!user.settings?.pending) return;
+  const settings = { ...user.settings };
+  delete settings.pending;
+  user.settings = settings;
+  await db.from("users").update({ settings }).eq("id", user.id);
 }
 
 // ── /setevery: pick an interval, then choose which items it applies to ───────
@@ -622,38 +663,41 @@ function showEveryInterval(chatId, messageId, cqId) {
       { keyboard: setEveryIntervalKeyboard() }));
 }
 
+const SCOPE_PROMPT = (interval) =>
+  `⏱ Check every ${interval} — which items?\n\n• Free — the ones that don't need a key.\n• Bot-protected — the ones that spend your unblocker credits.\n• Both — everything on your list, and new ones.`;
+
 function showEveryScope(chatId, messageId, cqId, interval) {
   if (!INTERVAL_OPTIONS[interval]) return answerCallback(BOT_TOKEN, cqId);
   return answerCallback(BOT_TOKEN, cqId).then(() =>
-    editMessage(BOT_TOKEN, chatId, messageId,
-      `⏱ Check every ${interval} — which items?\n\n• All items — everything on your list, and new ones.\n• Only bot-protected — just the ones that spend your unblocker credits.`,
+    editMessage(BOT_TOKEN, chatId, messageId, SCOPE_PROMPT(interval),
       { keyboard: setEveryScopeKeyboard(interval) }));
 }
 
 /**
  * Apply a chosen interval to a scope AND make it the default for new items in
- * that scope. "def" touches only bot-protected items (the ones that cost the
- * user credits); "all" touches everything. Each item is floored — a defended
- * item can't be driven faster than its tier allows — but setting things slower
- * (the usual intent: everything to daily to save credits) is always fine.
+ * that scope. Three scopes let the free and credit-spending items be tuned
+ * independently: "free" touches non-defended items, "def" the bot-protected
+ * ones, "both" everything. Each item is floored — a defended item can't be
+ * driven faster than its tier allows — but setting things slower (the usual
+ * intent: bot-protected to daily to save credits) is always fine.
  */
 async function applyDefaultEvery(user, chatId, messageId, cqId, scope, interval) {
   const minutes = INTERVAL_OPTIONS[interval];
   if (!minutes) return answerCallback(BOT_TOKEN, cqId);
 
-  // "def" sets only the bot-protected default; "all" sets both, so new items of
-  // either kind inherit it (defended is floored per-tier at use time anyway).
-  const newSettings = scope === "def"
-    ? { ...(user.settings ?? {}), interval_minutes_defended: minutes }
-    : { ...(user.settings ?? {}), interval_minutes: minutes, interval_minutes_defended: minutes };
-  await db.from("users").update({ settings: newSettings }).eq("id", user.id);
-  user.settings = newSettings;
+  // Store the default(s) for NEW items. "both" sets both so either kind inherits.
+  const settings = { ...(user.settings ?? {}) };
+  if (scope === "free" || scope === "both") settings.interval_minutes = minutes;
+  if (scope === "def" || scope === "both") settings.interval_minutes_defended = minutes;
+  await db.from("users").update({ settings }).eq("id", user.id);
+  user.settings = settings;
 
+  const isDefended = (s) => s.tracked_products?.fetch_strategy === "unblocker";
   const { data: subs } = await db.from("subscriptions")
     .select("id, tracked_products(id, adapter, fetch_strategy)")
     .eq("user_id", user.id).eq("status", "active");
-  const inScope = (subs ?? []).filter(
-    (s) => scope === "all" || s.tracked_products?.fetch_strategy === "unblocker");
+  const inScope = (subs ?? []).filter((s) =>
+    scope === "both" || (scope === "def" ? isDefended(s) : !isDefended(s)));
 
   const affected = new Set();
   for (const s of inScope) {
@@ -664,10 +708,10 @@ async function applyDefaultEvery(user, chatId, messageId, cqId, scope, interval)
   for (const pid of affected) await recomputeProductInterval(pid);
 
   await answerCallback(BOT_TOKEN, cqId, "Saved");
-  const scopeWord = scope === "def" ? "bot-protected items" : "items";
+  const word = scope === "def" ? "bot-protected " : scope === "free" ? "free " : "";
   const note = affected.size
-    ? `Set your ${affected.size} ${scopeWord} to every ${interval}, and new ${scope === "def" ? "bot-protected " : ""}ones will default to that.`
-    : `New ${scope === "def" ? "bot-protected " : ""}items will default to every ${interval}. (You have none to update yet.)`;
+    ? `Set your ${affected.size} ${word}item${affected.size > 1 ? "s" : ""} to every ${interval}, and new ${word}ones will default to that.`
+    : `New ${word}items will default to every ${interval}. (You have none to update yet.)`;
   return editMessage(BOT_TOKEN, chatId, messageId, `⏱️ ${note}`, { keyboard: prefsKeyboard() });
 }
 
@@ -699,9 +743,7 @@ async function setDefaultSize(user, chatId, categoryWord, size) {
  *  straight to the scope choice; otherwise the interval picker opens first. */
 async function setDefaultEvery(user, chatId, value) {
   if (value && INTERVAL_OPTIONS[value]) {
-    return reply(chatId,
-      `⏱ Check every ${value} — which items?\n\n• All items — everything on your list, and new ones.\n• Only bot-protected — just the ones that spend your unblocker credits.`,
-      { keyboard: setEveryScopeKeyboard(value) });
+    return reply(chatId, SCOPE_PROMPT(value), { keyboard: setEveryScopeKeyboard(value) });
   }
   return reply(chatId,
     "⏱ How often should I check?\n\nPick an interval, then choose whether it applies to everything or only the bot-protected items that spend your credits.",
@@ -732,10 +774,13 @@ async function handleCallback(cq) {
   // be handled before the per-item ownership lookup below.
   switch (action) {
     case "P":  return renderPrefs(user, chatId, messageId, cq.id);
+    case "Ps": return showPrefsSizes(chatId, messageId, cq.id);
+    case "Pc": return promptDefaultSize(user, chatId, messageId, cq.id, arg);
     case "Pe": return showEveryInterval(chatId, messageId, cq.id);
     case "Pi": return showEveryScope(chatId, messageId, cq.id, arg);
-    case "Pa": return applyDefaultEvery(user, chatId, messageId, cq.id, "all", arg);
+    case "Pf": return applyDefaultEvery(user, chatId, messageId, cq.id, "free", arg);
     case "Pd": return applyDefaultEvery(user, chatId, messageId, cq.id, "def", arg);
+    case "Pa": return applyDefaultEvery(user, chatId, messageId, cq.id, "both", arg);
   }
 
   const sub = subId === undefined ? null : await ownedSub(user.id, subId);
