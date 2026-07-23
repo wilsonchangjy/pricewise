@@ -73,6 +73,23 @@ export function parseJsonLd(html, item) {
   return fromProduct(node, item, checkedAt);
 }
 
+/**
+ * A displayable title from a Product node. Some stores (Farfetch especially)
+ * put only the bare product name in JSON-LD — "small Croissant bag in leather"
+ * — with the label everyone recognises, the BRAND, in a separate field. Prepend
+ * it unless the name already leads with it, so alerts read "LEMAIRE small
+ * Croissant bag in leather" rather than a brand-less fragment.
+ */
+export function titleOf(node) {
+  const name = node?.name != null ? String(node.name).trim() : "";
+  if (!name) return undefined;
+  const brand = String(node?.brand?.name ?? (typeof node?.brand === "string" ? node.brand : "")).trim();
+  if (!brand) return name;
+  return new RegExp(`^${brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name)
+    ? name
+    : `${brand} ${name}`;
+}
+
 function fromProduct(node, item, checkedAt) {
   const offer = offerOf(node);
   if (!offer) return { ok: false, kind: "parse", message: "JSON-LD Product has no offers", checkedAt };
@@ -81,7 +98,7 @@ function fromProduct(node, item, checkedAt) {
   const available = availOf(offer);
   const compareRaw = compareAtOf(offer);
   const compareAtPrice = compareRaw && price != null && compareRaw > price ? compareRaw : undefined;
-  return { ok: true, price, currency, compareAtPrice, available, variants: [{ id: "default", label: item.label, price, available }], title: node.name ? String(node.name) : undefined, checkedAt };
+  return { ok: true, price, currency, compareAtPrice, available, variants: [{ id: "default", label: item.label, price, available }], title: titleOf(node), checkedAt };
 }
 
 function fromProductGroup(node, item, checkedAt) {
@@ -107,7 +124,7 @@ function fromProductGroup(node, item, checkedAt) {
   const groupOffer = offerOf(node) ?? offerOf(node.hasVariant.find((v) => offerOf(v)));
   const compareRaw = compareAtOf(groupOffer);
   const compareAtPrice = compareRaw && price != null && compareRaw > price ? compareRaw : undefined;
-  return { ok: true, price, currency, compareAtPrice, available, variants, title: node.name ? String(node.name) : undefined, checkedAt };
+  return { ok: true, price, currency, compareAtPrice, available, variants, title: titleOf(node), checkedAt };
 }
 
 function isType(node, type) {

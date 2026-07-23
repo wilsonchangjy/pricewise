@@ -11,6 +11,22 @@
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
 import { parseJsonLd } from "./jsonld.mjs";
+import { decodeEntities } from "../text.mjs";
+
+/**
+ * Farfetch's JSON-LD `name` is a bare, lower-cased fragment ("small Croissant
+ * bag in leather"). Its og:title is the real thing — "LEMAIRE Small Croissant
+ * Bag In Leather | Black | FARFETCH" — so prefer that, dropping the trailing
+ * " | colour | FARFETCH" segments. Matters most for share links, which carry no
+ * slug and otherwise leave the bot showing "Item .Aspx".
+ */
+export function farfetchTitle(html) {
+  const m = String(html).match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)
+    ?? String(html).match(/<title[^>]*>([^<]+)/i);
+  if (!m) return undefined;
+  const t = decodeEntities(m[1]).split("|")[0].replace(/\s+/g, " ").trim();
+  return t || undefined;
+}
 
 /** @param {import("../types.mjs").Item} item */
 export async function readFarfetch(item, ctx = {}) {
@@ -30,6 +46,9 @@ export async function readFarfetch(item, ctx = {}) {
   }
 
   const out = parseJsonLd(res.html, item);
-  if (out.ok) { out.tier = res.tier; out.cost = res.cost; out.remaining = res.remaining; }
+  if (out.ok) {
+    out.title = farfetchTitle(res.html) ?? out.title;
+    out.tier = res.tier; out.cost = res.cost; out.remaining = res.remaining;
+  }
   return out;
 }
