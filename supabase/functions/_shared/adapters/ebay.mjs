@@ -88,10 +88,23 @@ export function stateFromEbay(html) {
  */
 export function listingKind(html) {
   const i = String(html).search(/x-buybox/i);
-  if (i < 0) return null;
-  const cta = String(html).slice(i, i + 2500).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-  if (/Buy It Now|Add to cart|Add to basket/i.test(cta)) return "fixed";
-  if (/Place bid|Bid now/i.test(cta)) return "auction";
+  if (i >= 0) {
+    const cta = String(html).slice(i, i + 2500).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    if (/Buy It Now|Add to cart|Add to basket/i.test(cta)) return "fixed";
+    if (/Place bid|Bid now/i.test(cta)) return "auction";
+    // Buybox present but no CTA in it — eBay sometimes serves a broken module
+    // ("Oops! …trouble connecting to our server. Refresh Browser") in the CTA's
+    // place. Don't give up: fall through to the price area, which still renders.
+  }
+  // The primary-price block survives a broken buybox and reveals the kind — a
+  // fixed listing shows "Buy It Now"/"or Best Offer" beside the price, an auction
+  // shows a bid count. Scoped to ~400 chars so a carousel's CTA can't leak in.
+  const p = String(html).search(/x-price-primary/i);
+  if (p >= 0) {
+    const near = String(html).slice(p, p + 400).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    if (/or Best Offer|Buy It Now/i.test(near)) return "fixed";
+    if (/\bbids?\b|Current bid/i.test(near)) return "auction";
+  }
   return null;
 }
 

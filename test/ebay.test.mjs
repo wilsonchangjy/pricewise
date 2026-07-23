@@ -32,6 +32,19 @@ test("a real auction page is refused permanently, on sight", () => {
   assert.match(r.message, /only ever goes up/);
 });
 
+// Captured live 2026-07-23: eBay served a BROKEN buy-box ("Oops! …trouble
+// connecting to our server. Refresh Browser") in place of the CTA, so the kind
+// couldn't be read from it and the whole listing soft-failed ("couldn't tell
+// whether this listing is live"). The price block still renders "or Best Offer",
+// which is enough to know it's a live fixed-price listing.
+test("a broken buy-box falls back to the price block, not a soft failure", () => {
+  const r = parseEbay(fixture("ebay-buybox-error.html"), { url: "https://www.ebay.com/itm/318509998125" });
+  assert.equal(r.ok, true, "must not soft-fail just because eBay's buy-box module errored");
+  assert.equal(r.price, 275);
+  assert.equal(r.variants[0].state, STATE.IN_STOCK);
+  assert.match(r.title, /Carhartt Brown Detroit/);
+});
+
 test("eBay's money formats parse, including the European decimal", () => {
   assert.deepEqual(parseMoney("US $143.50"), { price: 143.5, currency: "USD" });
   assert.deepEqual(parseMoney("AU $1,299.00"), { price: 1299, currency: "AUD" });
