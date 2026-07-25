@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parseAmazon, asinOf, marketplaceOf, stateFromAvailability } from "../supabase/functions/_shared/adapters/amazon.mjs";
+import { parseAmazon, asinOf, marketplaceOf, stateFromAvailability, hasAvailabilityBlock } from "../supabase/functions/_shared/adapters/amazon.mjs";
 import { STATE } from "../supabase/functions/_shared/stock.mjs";
 import { normalizeUrl } from "../supabase/functions/_shared/urlguard.mjs";
 import { decodeEntities } from "../supabase/functions/_shared/text.mjs";
@@ -119,4 +119,25 @@ test("amazon: a homeware item parses", () => {
   assert.equal(r.ok, true);
   assert.equal(r.price, 11.04, "matches what a vendor's structured Amazon API returned independently");
   assert.equal(r.variants[0].available, true);
+});
+
+// THE BUG THIS CAUGHT: the fetch gate only asked for a productTitle. Amazon
+// serves datacentre IPs a degraded page that HAS the title but no availability
+// section, so it passed the gate, was accepted as a direct fetch, and then
+// soft-failed the parse — 4 of 5 scheduled checks on a book that reads
+// perfectly from a residential IP. The gate must demand the stock markup too.
+test("the fetch gate rejects a page with a title but no availability block", () => {
+  const degraded = '<html><span id="productTitle">The Odyssey</span>'
+    + '<span class="a-price-whole">29</span></html>';
+  assert.equal(hasAvailabilityBlock(degraded), false, "a thin page must escalate, not be parsed");
+  // ...and the parse agrees it can't be trusted, so nothing false is reported.
+  const r = parseAmazon(degraded, { url: "https://www.amazon.sg/dp/0393356256" });
+  assert.equal(r.ok, false);
+  assert.equal(r.kind, "soft");
+});
+
+test("the gate accepts either availability shape Amazon uses", () => {
+  assert.equal(hasAvailabilityBlock('<div class="primary-availability-message">In stock</div>'), true);
+  assert.equal(hasAvailabilityBlock('<div id="availability"><span>In stock</span></div>'), true);
+  assert.equal(hasAvailabilityBlock(FIXTURE), true, "the real captured page passes");
 });

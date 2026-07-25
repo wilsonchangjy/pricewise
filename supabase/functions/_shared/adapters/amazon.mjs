@@ -53,6 +53,15 @@ export function stateFromAvailability(text) {
 const clean = (s) => decodeEntities(String(s ?? "")).replace(/\s+/g, " ").trim();
 
 /**
+ * Does this page carry the stock markup we actually read? Used as the fetch
+ * gate: a page without it is a thin render to escalate past, not a reading.
+ * Kept in step with the selectors parseAmazon uses below.
+ */
+export function hasAvailabilityBlock(html) {
+  return /primary-availability-message|id="availability"/i.test(String(html));
+}
+
+/**
  * @param {string} html
  * @param {import("../types.mjs").Item} item
  * @returns {import("../types.mjs").ReadResult}
@@ -135,9 +144,18 @@ export async function readAmazon(item, ctx = {}) {
     provider: ctx.unblockerProvider,
     startTier: ctx.startTier,
     country: marketplaceOf(item.url) === "sg" ? "sg" : undefined,
-    // The shell Amazon serves datacentre IPs has no productTitle — that's the
-    // signal to stop trusting it and escalate.
-    validate: (html) => html.includes('id="productTitle"'),
+    // What we need is a title AND an availability block — validating only the
+    // title was too weak. Amazon serves datacentre IPs a degraded page that DOES
+    // carry a productTitle but omits the availability section, so it sailed
+    // through this gate, got accepted as a direct fetch, and then failed the
+    // parse ("no availability text found") — 4 of 5 scheduled checks on a book
+    // that reads perfectly from a residential IP. Demand the stock markup here
+    // and a thin page escalates up the unblocker ladder instead of soft-failing.
+    //
+    // Deliberately NOT requiring a price marker: a genuinely "Currently
+    // unavailable" item shows no price, and demanding one would burn every tier
+    // and then fail on a page we could actually read.
+    validate: (html) => html.includes('id="productTitle"') && hasAvailabilityBlock(html),
   });
   if (!res.ok) {
     const kind = res.status === 403 ? "blocked" : res.error === "timeout" ? "timeout" : "http";
