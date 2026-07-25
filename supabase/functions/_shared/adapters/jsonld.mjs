@@ -74,6 +74,21 @@ export function parseJsonLd(html, item) {
 }
 
 /**
+ * The fetch gate for every adapter that reads through parseJsonLd (Zara,
+ * Farfetch, MR PORTER). One definition so the three can't drift apart.
+ *
+ * It asks for the two things the parser refuses without: a Product/ProductGroup
+ * node, and an offers block. Checking merely "the page contains JSON-LD" — as
+ * Zara's gate did — passes on breadcrumb and organisation markup, so category
+ * pages and challenge shells were accepted and then failed the parse, without
+ * ever escalating a tier.
+ */
+export function hasJsonLdProduct(html) {
+  const s = String(html);
+  return /"@type"\s*:\s*"(ProductGroup|Product)"/.test(s) && /"offers"\s*:/.test(s);
+}
+
+/**
  * A displayable title from a Product node. Some stores (Farfetch especially)
  * put only the bare product name in JSON-LD — "small Croissant bag in leather"
  * — with the label everyone recognises, the BRAND, in a separate field. Prepend

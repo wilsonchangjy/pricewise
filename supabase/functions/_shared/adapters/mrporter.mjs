@@ -11,7 +11,7 @@
 // matched exactly (only M in stock of S/M/L/XL/XXL).
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
-import { parseJsonLd } from "./jsonld.mjs";
+import { parseJsonLd, hasJsonLdProduct } from "./jsonld.mjs";
 
 /** @param {import("../types.mjs").Item} item */
 export async function readMrPorter(item, ctx = {}) {
@@ -21,7 +21,7 @@ export async function readMrPorter(item, ctx = {}) {
     provider: ctx.unblockerProvider,
     startTier: ctx.startTier,
     country: "sg",
-    validate: (html) => /"@type"\s*:\s*"(ProductGroup|Product)"/.test(html),
+    validate: hasJsonLdProduct,
   });
   if (!res.ok) {
     const kind = res.status === 403 ? "blocked" : res.error === "timeout" ? "timeout" : "http";

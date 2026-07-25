@@ -8,13 +8,20 @@
 // size's Zara sku (e.g. "519188937-251-2" for size S).
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
-import { parseJsonLd } from "./jsonld.mjs";
+import { parseJsonLd, hasJsonLdProduct } from "./jsonld.mjs";
 
 /** @param {import("../types.mjs").Item} item */
 export async function readZara(item, ctx = {}) {
   const checkedAt = new Date().toISOString();
   const res = await fetchMaybeUnblocked(item, { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider,
-    startTier: ctx.startTier, country: "sg", validate: (html) => html.includes("application/ld+json") });
+    startTier: ctx.startTier, country: "sg",
+    // Require the PRODUCT node, not merely "some JSON-LD on the page". Zara
+    // ships JSON-LD for breadcrumbs and organisation markup too, so the old
+    // check passed on category pages and challenge shells alike — anything with
+    // a single <script type="application/ld+json"> sailed through and then
+    // failed the parse, without ever escalating a tier. Same gate as Farfetch
+    // and MR PORTER, which read through the identical parser.
+    validate: hasJsonLdProduct });
   if (!res.ok) {
     const kind = res.status === 403 ? "blocked" : res.error === "timeout" ? "timeout" : "http";
     return { ok: false, kind, status: res.status, message: `zara: ${res.message}`, checkedAt };

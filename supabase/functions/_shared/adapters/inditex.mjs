@@ -152,7 +152,11 @@ function findSizesArray(node) {
 export async function readInditex(item, ctx = {}) {
   const checkedAt = new Date().toISOString();
   const res = await fetchMaybeUnblocked(item, { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider,
-    startTier: ctx.startTier, country: "sg", validate: (html) => html.includes("visibilityValue") });
+    startTier: ctx.startTier, country: "sg",
+    // The parser reads visibilityValue out of an application/json script, so the
+    // gate asks for both. The bare marker alone can appear in a JS bundle on a
+    // page whose state script never rendered — accepted, then unparseable.
+    validate: (html) => html.includes("visibilityValue") && /type=["']application\/json["']/i.test(html) });
   if (!res.ok) {
     const kind = res.status === 403 ? "blocked" : res.error === "timeout" ? "timeout" : "http";
     return { ok: false, kind, status: res.status, message: `inditex: ${res.message}`, checkedAt };

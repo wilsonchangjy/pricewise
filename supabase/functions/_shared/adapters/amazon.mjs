@@ -109,7 +109,16 @@ export function parseAmazon(html, item) {
   }
 
   // A missing price on an otherwise-parsed page means "can't be bought right
-  // now" far more often than "free", so don't report availability off it.
+  // now" far more often than "free", so don't report availability off it — an
+  // Amazon item that's genuinely unavailable shows no price at all (see the
+  // amazon-sg-unavailable fixture), and its state says OUT_OF_STOCK.
+  //
+  // But if the stock line says BUYABLE and the price is still missing, those two
+  // disagree, and the likeliest explanation is a half-rendered page. Refuse
+  // rather than call a live item unavailable.
+  if (isBuyable(state) && price == null) {
+    return { ok: false, kind: "soft", message: "amazon: stock reads as available but the price is missing (partial page)", checkedAt };
+  }
   const available = isBuyable(state) && price != null;
 
   const currency = item.currency ?? MARKET_CURRENCY[marketplaceOf(item.url) ?? ""] ?? "";

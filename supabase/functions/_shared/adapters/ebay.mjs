@@ -151,6 +151,13 @@ export function parseEbay(html, item) {
   if (state === null) {
     return { ok: false, kind: "soft", message: "ebay: couldn't tell whether this listing is live", checkedAt };
   }
+
+  // Stock says buyable but there's no price: that's a page we half-read, not an
+  // item you can't buy. Saying "available: false" here fired a false SOLD OUT on
+  // a live listing. Refuse instead — silence beats a wrong alert.
+  if (isBuyable(state) && price == null) {
+    return { ok: false, kind: "soft", message: "ebay: stock reads as live but the price is missing (partial page)", checkedAt };
+  }
   const available = isBuyable(state) && price != null;
 
   return {
@@ -183,7 +190,14 @@ export async function readEbay(item, ctx = {}) {
     apiKey: ctx.unblockerKey,
     provider: ctx.unblockerProvider,
     startTier: ctx.startTier,
-    validate: (html) => /x-price-primary|x-item-title__mainTitle/.test(html),
+    // Require the PRICE block, not "price OR title". The old OR let a page with
+    // only a title through: price came back undefined, `available` collapsed to
+    // false, and a live item fired a false "⛔ SOLD OUT". The price block is also
+    // what listingKind falls back to, so it's the one element we cannot proceed
+    // without. Ended listings are exempt — they legitimately may not price, and
+    // stateFromEbay detects them page-wide.
+    validate: (html) => /x-price-primary/.test(html)
+      || /This listing (has ended|was ended)|no longer available/i.test(html),
   });
   if (!res.ok) {
     const kind = res.status === 403 ? "blocked" : res.error === "timeout" ? "timeout" : "http";

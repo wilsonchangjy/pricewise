@@ -10,7 +10,7 @@
 // both — before it did, this page read as per-size stock with NO price at all.
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
-import { parseJsonLd } from "./jsonld.mjs";
+import { parseJsonLd, hasJsonLdProduct } from "./jsonld.mjs";
 import { decodeEntities } from "../text.mjs";
 
 /**
@@ -37,8 +37,8 @@ export async function readFarfetch(item, ctx = {}) {
     startTier: ctx.startTier,
     country: "sg",
     // A challenge page has no product JSON-LD — that's the signal to escalate
-    // rather than parse a shell.
-    validate: (html) => /"@type"\s*:\s*"(ProductGroup|Product)"/.test(html),
+    // rather than parse a shell. Shared gate: see hasJsonLdProduct.
+    validate: hasJsonLdProduct,
   });
   if (!res.ok) {
     const kind = res.status === 403 ? "blocked" : res.error === "timeout" ? "timeout" : "http";
