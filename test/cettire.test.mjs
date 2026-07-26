@@ -69,3 +69,38 @@ test("advertising junk is stripped so one product is one row", () => {
   assert.equal(normalizeUrl(ad), normalizeUrl(URL_));
   assert.equal(normalizeUrl(ad), "https://www.cettire.com/sg/products/lemaire-croissant-small-shoulder-bag-928478783/cmVhY3Rpb24vcHJvZHVjdDpKYTZ4N0xlMzdDdTVCS1lCTA%3D%3D");
 });
+
+// ── multi-size: the bug the one-size bag hid ─────────────────────────────────
+// Every SIZE on Cettire is its own variant with its own token, so matching
+// variants on the URL's token found exactly one — correct for a one-size bag,
+// and silently 1-of-30 on a sneaker. The authoritative link is
+// CatalogProduct.variants[]; the token only says which product owns them.
+const MULTI = readFileSync(new URL("./fixtures/cettire-multisize.html", import.meta.url), "utf8");
+// This URL points at IT35 — which is SOLD OUT. Captured live 2026-07-26.
+const MULTI_URL = "https://www.cettire.com/sg/products/golden-goose-superstar/cmVhY3Rpb24vcHJvZHVjdDpiYk1pV21TeHYzRXVtU2poWg%3D%3D";
+
+test("every size on the product is read, not just the one named in the link", () => {
+  const r = parseCettire(MULTI, { url: MULTI_URL });
+  assert.equal(r.ok, true);
+  assert.equal(r.variants.length, 8, "all of the product's sizes, not the URL's single variant");
+  const labels = r.variants.map((v) => v.label);
+  assert.ok(labels.includes("IT35") && labels.includes("IT42"), "sizes span the range");
+});
+
+test("sold-out sizes are reported as such — that's the point of watching them", () => {
+  const r = parseCettire(MULTI, { url: MULTI_URL });
+  const bySize = Object.fromEntries(r.variants.map((v) => [v.label, v.available]));
+  assert.equal(bySize["IT35"], false, "IT35 has zero inventory");
+  assert.equal(bySize["IT40"], true);
+  assert.ok(r.available, "the product is buyable even though the linked size isn't");
+});
+
+// Sizes are priced individually (IT35 at 220.89 vs IT44 at 519.51 on the live
+// page). Quoting the cheapest of ANY size advertises a bargain you can't buy.
+test("the headline price is the cheapest BUYABLE size, not the cheapest size", () => {
+  const r = parseCettire(MULTI, { url: MULTI_URL });
+  const cheapestBuyable = Math.min(...r.variants.filter((v) => v.available).map((v) => v.price));
+  const cheapestAny = Math.min(...r.variants.map((v) => v.price));
+  assert.equal(r.price, cheapestBuyable);
+  assert.ok(cheapestAny < cheapestBuyable, "fixture must actually contain a cheaper sold-out size");
+});

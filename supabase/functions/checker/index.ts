@@ -13,7 +13,7 @@ import { sendMessage, isUnreachable } from "../_shared/telegram.mjs";
 import { contextLine } from "../_shared/history.mjs";
 import { matchVariant } from "../_shared/variants.mjs";
 import { verifyPrice } from "../_shared/verify.mjs";
-import { TIER_INTERVAL_MIN, nextCheckDelayMinutes } from "../_shared/policy.mjs";
+import { TIER_INTERVAL_MIN, ADAPTER_TIER, nextCheckDelayMinutes } from "../_shared/policy.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const BATCH_SIZE = Number(Deno.env.get("CHECK_BATCH_SIZE") ?? 20);
@@ -97,7 +97,19 @@ async function checkProduct(product) {
   const tierAge = product.unblocker_tier_at
     ? (Date.now() - new Date(product.unblocker_tier_at).getTime()) / 86_400_000
     : Infinity;
-  const startTier = tierAge < TIER_MEMORY_DAYS ? (product.unblocker_tier ?? undefined) : undefined;
+  const learnedTier = tierAge < TIER_MEMORY_DAYS ? (product.unblocker_tier ?? undefined) : undefined;
+
+  // With nothing learned yet, fall back to what we MEASURED for this brand
+  // instead of restarting at plain. ADAPTER_TIER exists for exactly this ("what
+  // each brand needs before its first check teaches us"), but it was only ever
+  // read for cost quotes — so every first check re-walked the ladder from the
+  // bottom. On MR PORTER that costs 58 SECONDS to earn a 502 before super
+  // answers in 6, and the checker claims up to 20 products per 5-minute tick, so
+  // a couple of those stalls can swallow the whole run. Costs nothing extra: a
+  // doomed cheap attempt is billed 0 credits, it just burns the clock.
+  const startTier = learnedTier ?? (product.fetch_strategy === "unblocker"
+    ? ADAPTER_TIER[product.adapter] ?? undefined
+    : undefined);
 
   // Running dry should look like pausing, not like breaking. A failed fetch would
   // count against the product and eventually park it — punishing the user for an

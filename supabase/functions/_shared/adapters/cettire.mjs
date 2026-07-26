@@ -110,10 +110,27 @@ export function parseCettire(html, item) {
     return { ok: false, kind: "parse", message: "cettire: no product token in that link", checkedAt };
   }
 
-  // ONLY this product's variants. Entries for related products live in the same
-  // store, and Apollo's field-level cache keys (prefixed "$") are not variants.
-  const keys = Object.keys(store).filter((k) =>
-    !k.startsWith("$") && store[k]?.inventoryAvailableToSell !== undefined && store[k]?.variantId === token);
+  const real = (k) => !k.startsWith("$"); // Apollo's field-level cache keys aren't entities
+  const isVariant = (e) => e?.inventoryAvailableToSell !== undefined;
+
+  // WHICH PRODUCT IS OURS. Every SIZE is its own variant with its own token, so
+  // matching variants on the URL's token finds exactly one — which looked right
+  // on a one-size bag and silently dropped 29 of 30 sizes on a sneaker. The
+  // authoritative link is CatalogProduct.variants[], a list of refs into this
+  // same store; the URL's token just tells us which product owns them.
+  const products = Object.keys(store).filter((k) => real(k) && store[k]?.__typename === "CatalogProduct");
+  const tokenVariantKey = Object.keys(store).find((k) => real(k) && isVariant(store[k]) && store[k].variantId === token);
+  const refsOf = (pk) => (Array.isArray(store[pk]?.variants) ? store[pk].variants : []).map((r) => r?.id ?? r);
+
+  let productKey = tokenVariantKey
+    ? products.find((pk) => refsOf(pk).includes(tokenVariantKey))
+    : undefined;
+  productKey ??= products.length === 1 ? products[0] : undefined;
+
+  // Resolve the product's own variants; fall back to the single token match if
+  // the product entry is missing, so a shape change degrades rather than breaks.
+  let keys = productKey ? refsOf(productKey).filter((k) => store[k] && isVariant(store[k])) : [];
+  if (!keys.length && tokenVariantKey) keys = [tokenVariantKey];
   if (!keys.length) {
     return { ok: false, kind: "parse", message: "cettire: no variants matched this product (shape changed?)", checkedAt };
   }
@@ -150,15 +167,23 @@ export function parseCettire(html, item) {
     return { ok: false, kind: "parse", message: `cettire: size ${wanted} is no longer listed`, checkedAt };
   }
 
-  const prices = chosen.map((v) => v.price).filter((p) => typeof p === "number");
-  const price = prices.length ? Math.min(...prices) : undefined;
+  // Sizes are priced individually here (a sneaker ran IT35 at 220.89 and IT44 at
+  // 519.51), so the headline is the cheapest one you can ACTUALLY BUY. Taking
+  // the minimum across every size quotes a bargain that's sold out — the same
+  // dishonesty as a false "in stock", wearing a price tag.
+  const priceOf = (vs) => {
+    const ps = vs.map((v) => v.price).filter((p) => typeof p === "number");
+    return ps.length ? Math.min(...ps) : undefined;
+  };
+  const buyable = chosen.filter((v) => v.available);
+  const price = priceOf(buyable) ?? priceOf(chosen);
 
   // Stock says buyable but no price: a half-read page, not an unbuyable item.
   if (chosen.some((v) => isBuyable(v.state)) && price == null) {
     return { ok: false, kind: "soft", message: "cettire: stock reads as live but the price is missing (partial page)", checkedAt };
   }
 
-  const product = Object.values(store).find((e) => e?.__typename === "CatalogProduct" && e?.title);
+  const product = productKey ? store[productKey] : Object.values(store).find((e) => e?.__typename === "CatalogProduct" && e?.title);
   const title = product?.title ? decodeEntities(String(product.title)).replace(/\s+/g, " ").trim() : undefined;
 
   return {

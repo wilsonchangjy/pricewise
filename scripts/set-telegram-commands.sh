@@ -19,21 +19,32 @@ set -euo pipefail
 
 : "${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN (export it or source your .env first)}"
 
-read -r -d '' PAYLOAD <<'JSON' || true
-{
-  "scope": {"type": "all_private_chats"},
-  "commands": [
-    {"command": "list",   "description": "Your items — tap one to change it"},
-    {"command": "prefs",  "description": "Your defaults, limits & unblocker credits"},
-    {"command": "setkey", "description": "Add your own unblocker key"},
-    {"command": "help",   "description": "How this works"}
-  ]
-}
+read -r -d '' COMMANDS <<'JSON' || true
+[
+  {"command": "list",   "description": "Your items — tap one to change it"},
+  {"command": "prefs",  "description": "Your defaults, limits & unblocker credits"},
+  {"command": "setkey", "description": "Add your own unblocker key"},
+  {"command": "help",   "description": "How this works"}
+]
 JSON
 
-echo "Registering $(echo "$PAYLOAD" | grep -c '"command"') commands (scope: all_private_chats)…"
-curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands" \
-  -H "Content-Type: application/json" -d "$PAYLOAD"
+# Register on BOTH the private-chat scope and the DEFAULT scope. The default was
+# left empty once, and while iOS read the private-chat scope happily, a client
+# that falls back to the default saw no commands — and the ☰ Menu button is
+# populated from whichever scope the client resolves.
+for SCOPE in '"scope": {"type": "all_private_chats"},' ''; do
+  echo "Registering commands (${SCOPE:-default scope})…"
+  curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands" \
+    -H "Content-Type: application/json" \
+    -d "{${SCOPE} \"commands\": ${COMMANDS}}"
+  echo
+done
+
+# The ☰ Menu button next to the message box. "commands" makes it list the above;
+# it's Telegram's default, but pin it so a stray BotFather change can't drop it.
+echo "Pinning the menu button to the command list…"
+curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setChatMenuButton" \
+  -H "Content-Type: application/json" -d '{"menu_button":{"type":"commands"}}'
 echo
 
 # Show what's now live so a run is self-verifying.
