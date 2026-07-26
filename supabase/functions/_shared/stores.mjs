@@ -27,6 +27,7 @@ export const STORES = [
   { adapter: "cos", name: "COS", perSize: true },
   { adapter: "mango", name: "Mango", perSize: true },
   { adapter: "wix", name: "Wix stores", perSize: true },
+  { adapter: "woocommerce", name: "Any WooCommerce store", perSize: true, note: "about a third of all shops online" },
   { adapter: "jsonld", name: "Most other shops", perSize: false, note: "read automatically where a site publishes standard product data" },
 
   { adapter: "amazon", name: "Amazon", perSize: true, note: "each size is its own listing" },
@@ -41,6 +42,7 @@ export const STORES = [
   { adapter: "mrporter", name: "MR PORTER", perSize: true, note: "prices in GBP" },
   { adapter: "netaporter", name: "NET-A-PORTER", perSize: true, note: "prices in USD" },
   { adapter: "cettire", name: "Cettire", perSize: true, note: "prices in USD" },
+  { adapter: "ssense", name: "SSENSE", perSize: false, note: "no per-size stock published" },
 ];
 
 /** Free stores need no key; defended ones spend the user's own credits. */

@@ -1,0 +1,96 @@
+{
+ "id": 84706,
+ "name": "Scarlett White Dress",
+ "type": "variable",
+ "permalink": "https://goshopia.com/shop/womenswear/dress/scarlett-white-dress/",
+ "sku": "",
+ "prices": {
+  "price": "65000",
+  "regular_price": "80000",
+  "sale_price": "65000",
+  "price_range": null,
+  "currency_code": "AED",
+  "currency_symbol": "AED",
+  "currency_minor_unit": 2,
+  "currency_decimal_separator": ".",
+  "currency_thousand_separator": ",",
+  "currency_prefix": "",
+  "currency_suffix": "AED"
+ },
+ "is_in_stock": true,
+ "is_purchasable": true,
+ "variations": [
+  {
+   "id": 84714,
+   "attributes": [
+    {
+     "name": "SIZE",
+     "value": "2XS"
+    }
+   ]
+  },
+  {
+   "id": 84715,
+   "attributes": [
+    {
+     "name": "SIZE",
+     "value": "XS"
+    }
+   ]
+  },
+  {
+   "id": 84716,
+   "attributes": [
+    {
+     "name": "SIZE",
+     "value": "S"
+    }
+   ]
+  },
+  {
+   "id": 84717,
+   "attributes": [
+    {
+     "name": "SIZE",
+     "value": "M"
+    }
+   ]
+  },
+  {
+   "id": 84718,
+   "attributes": [
+    {
+     "name": "SIZE",
+     "value": "L"
+    }
+   ]
+  },
+  {
+   "id": 84719,
+   "attributes": [
+    {
+     "name": "SIZE",
+     "value": "XL"
+    }
+   ]
+  },
+  {
+   "id": 84720,
+   "attributes": [
+    {
+     "name": "SIZE",
+     "value": "XXL"
+    }
+   ]
+  },
+  {
+   "id": 84721,
+   "attributes": [
+    {
+     "name": "SIZE",
+     "value": "XXXL"
+    }
+   ]
+  }
+ ]
+}

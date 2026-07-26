@@ -31,6 +31,7 @@ the code, not written twice.
 | **COS** | |
 | **Mango** | |
 | **Wix stores** | |
+| **Any WooCommerce store** | about a third of all shops online |
 | **Most other shops** | read automatically wherever a site publishes standard product data — product-level, not per size |
 
 ### Bring your own key (`/setkey`)
@@ -46,7 +47,8 @@ These block bots, so checks run through an unblocker on **your** credits — up 
 | **Bershka** | 1 credit | |
 | **Stradivarius** | 1 credit | |
 | **& Other Stories** | 1 credit | |
-| **Farfetch** | 1 credit | 6h | |
+| **Farfetch** | 1 credit | |
+| **SSENSE** | 1 credit | product-level only — no per-size stock published |
 | **Massimo Dutti & Oysho** | 5 credits | |
 | **Zara** | 10 credits | |
 | **MR PORTER** | 10 credits | prices in GBP |

@@ -26,6 +26,7 @@ const HOST_MAP = [
   [/(?:^|\.)cettire\.com$/i, "cettire"],
   [/(?:^|\.)net-a-porter\.com$/i, "netaporter"],
   [/(?:^|\.)endclothing\.com$/i, "end"],
+  [/(?:^|\.)ssense\.com$/i, "ssense"],
 ];
 
 // Adapters that must go through the unblocker (credits). Everything else is free.
@@ -35,7 +36,7 @@ const HOST_MAP = [
 // Unavailable", API paths included: they block the address, not the route. The
 // adapters still try direct first (a self-hoster on a residential IP gets it for
 // nothing), but /add must tell cloud users the truth about needing a key.
-const DEFENDED = new Set(["inditex", "zara", "asos", "stories", "bershka", "stradivarius", "amazon", "farfetch", "mrporter", "ebay", "cettire", "netaporter"]);
+const DEFENDED = new Set(["inditex", "zara", "asos", "stories", "bershka", "stradivarius", "amazon", "farfetch", "mrporter", "ebay", "cettire", "netaporter", "ssense"]);
 
 export const strategyFor = (adapter) => (DEFENDED.has(adapter) ? "unblocker" : "direct");
 
@@ -86,6 +87,27 @@ export async function detectAdapter(url, { fetchImpl = fetch } = {}) {
           return { adapter: "shopify", strategy: "direct", via: "shopify-js-probe" };
         }
       } catch { /* not shopify */ }
+    }
+  }
+
+
+  // 3b) WooCommerce probe — the OTHER huge long tail (~6.8M stores, about a
+  // third of all shops). Its Store API is public and unauthenticated, so one
+  // request both identifies the platform and proves we can read it. Checked
+  // AFTER Shopify because a Shopify store never answers this route.
+  if (handle || u.pathname.split("/").filter(Boolean).length) {
+    const parts = u.pathname.split("/").filter(Boolean);
+    const slug = parts[parts.length - 1];
+    if (slug) {
+      const w = await get(`${u.origin}/wp-json/wc/store/v1/products?slug=${encodeURIComponent(slug)}`, fetchImpl);
+      if (w.ok) {
+        try {
+          const list = JSON.parse(w.text);
+          if (Array.isArray(list) && list[0]?.id) {
+            return { adapter: "woocommerce", strategy: "direct", via: "woocommerce-store-api" };
+          }
+        } catch { /* not woocommerce */ }
+      }
     }
   }
 

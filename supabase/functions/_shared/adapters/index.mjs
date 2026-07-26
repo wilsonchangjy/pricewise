@@ -19,6 +19,8 @@ import { readEbay } from "./ebay.mjs";
 import { readCettire } from "./cettire.mjs";
 import { readNetaporter } from "./netaporter.mjs";
 import { readEnd } from "./endclothing.mjs";
+import { readWoocommerce } from "./woocommerce.mjs";
+import { readSsense } from "./ssense.mjs";
 import { readJsonLd } from "./jsonld.mjs";
 
 const READERS = {
@@ -40,6 +42,8 @@ const READERS = {
   cettire: readCettire,
   netaporter: readNetaporter,
   end: readEnd,
+  woocommerce: readWoocommerce,
+  ssense: readSsense,
   jsonld: readJsonLd,
 };
 

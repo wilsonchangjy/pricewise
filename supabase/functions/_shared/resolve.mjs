@@ -66,6 +66,18 @@ export function resolveSelector(url, adapter) {
       };
     }
 
+    case "ssense":
+      // Product-level only: SSENSE ships no hasVariant, so there is no per-size
+      // stock to read. Say so rather than implying the usual wedge.
+      return { ok: true, selector: {}, watching: "this product (SSENSE doesn't publish per-size stock)" };
+
+    case "woocommerce": {
+      const parts = u.pathname.split("/").filter(Boolean);
+      const slug = parts[parts.length - 1];
+      if (!slug) return { ok: false, reason: "that link has no product page in it — open the item and copy the URL from the address bar" };
+      return { ok: true, selector: { slug }, watching: "every size on the page" };
+    }
+
     case "farfetch":
     case "mrporter":
     case "netaporter":
