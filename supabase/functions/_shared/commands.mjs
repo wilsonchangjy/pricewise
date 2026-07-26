@@ -85,6 +85,11 @@ export function parseCommand(text) {
     }
     case "/providers":
       return { cmd: "providers" };
+
+    case "/stores":
+    case "/shops":
+    case "/sites":
+      return { cmd: "stores" };
     case "/setkey": {
       // Secret — tell the webhook to delete the user's message from the chat.
       if (!arg) {

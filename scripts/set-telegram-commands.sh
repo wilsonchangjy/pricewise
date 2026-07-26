@@ -22,6 +22,7 @@ set -euo pipefail
 read -r -d '' COMMANDS <<'JSON' || true
 [
   {"command": "list",   "description": "Your items — tap one to change it"},
+  {"command": "stores", "description": "Which shops I can track"},
   {"command": "prefs",  "description": "Your defaults, limits & unblocker credits"},
   {"command": "setkey", "description": "Add your own unblocker key"},
   {"command": "help",   "description": "How this works"}

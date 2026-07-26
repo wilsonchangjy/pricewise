@@ -18,32 +18,56 @@ just "is it in stock somewhere."
 
 ## Supported stores
 
-**Free to track** (no setup): any **Shopify** store, plus **Uniqlo, Mango, COS,
-Wix stores**, and any site with standard product data. That's a huge slice of
-fashion retail.
+`/stores` in the bot prints this same list, always current — it's generated from
+the code, not written twice.
 
-**Bot-protected stores** (Amazon, Zara, Massimo Dutti, Oysho, ASOS, Bershka,
-Stradivarius, Farfetch, MR PORTER, eBay, & Other Stories) need an unblocker, so they're opt-in: bring your
-own key with `/setkey` — up to 5 such items, on your own credits. How often each
-is checked follows what it costs: the cheap ones every 6 hours, the priciest
-once a day, and the bot tells you the monthly cost before you add anything.
-`/providers` lists the services that work and their free tiers — some renew
-monthly, which matters more than the headline number.
+### Free — just paste a link
 
-Note for self-hosters: Inditex brands (Zara, Bershka, Stradivarius…) block
-datacentre IPs but not home connections, so if you run this from a residential
-network those adapters try direct first and cost you nothing.
+| Store | Notes |
+|---|---|
+| **Any Shopify store** | thousands of independent brands |
+| **END.** | sold-out sizes aren't published, so they can't be pre-picked |
+| **Uniqlo** | |
+| **COS** | |
+| **Mango** | |
+| **Wix stores** | |
+| **Most other shops** | read automatically wherever a site publishes standard product data — product-level, not per size |
 
-On **Amazon**, paste the link for the size you want — each size is its own
-listing there, so the link already pins your variant. It's the cheapest of the
-bot-protected stores to check.
+### Bring your own key (`/setkey`)
 
-Share links work too: the short URLs that store apps hand out (`amzn.asia`,
-`s.lazada.sg` and friends) are followed to the real product page.
+These block bots, so checks run through an unblocker on **your** credits — up to
+5 such items. The bot quotes the monthly cost before you commit to one.
 
-**eBay** listings are read from `ebay.com` — regional hosts like `ebay.com.sg`
-can't be reached through an unblocker, and item numbers are global. Prices
-therefore come back in USD, which the bot tells you when you add one.
+| Store | Per check | Checked | Notes |
+|---|---|---|---|
+| **Amazon** | 1 credit | 6h | each size is its own listing, so the link pins your size |
+| **eBay** | 1 credit | 6h | fixed-price listings only; prices in USD |
+| **ASOS** | 1 credit | 6h | |
+| **Bershka** | 1 credit | 6h | |
+| **Stradivarius** | 1 credit | 6h | |
+| **& Other Stories** | 1 credit | 6h | |
+| **Farfetch** | 1 credit | 6h | |
+| **Massimo Dutti & Oysho** | 5 credits | daily | |
+| **Zara** | 10 credits | daily | |
+| **MR PORTER** | 10 credits | daily | prices in GBP |
+| **NET-A-PORTER** | 10 credits | daily | prices in USD |
+| **Cettire** | 10 credits | daily | prices in USD |
+
+`/providers` lists the unblocker services that work and their free tiers — some
+renew monthly, which matters more than the headline number.
+
+**A few things worth knowing**
+
+- **Self-hosting from home?** Inditex brands (Zara, Bershka, Stradivarius…) block
+  datacentre IPs but not residential ones, so those adapters try direct first and
+  cost you nothing on a home connection.
+- **Share links work.** The short URLs store apps hand out (`amzn.asia`,
+  `s.lazada.sg` and friends) are followed to the real product page.
+- **eBay** is read from `ebay.com`; regional hosts like `ebay.com.sg` can't be
+  reached through an unblocker and item numbers are global, so prices come back
+  in USD. The bot says so when you add one.
+- **Missing a shop?** Send the link anyway — unknown sites are tried against
+  standard product data first, and logged as a request if that fails.
 
 ## How it works
 
@@ -69,6 +93,7 @@ tap it in your list to change anything about it.
 |---|---|
 | paste a URL / `/add <url>` | start tracking an item |
 | `/list` | your items — **tap one** to set its size, a price-drop target, how often it's checked, see its history, or remove it |
+| `/stores` | which shops are supported, and which need a key |
 | `/prefs` | your default size and check frequency, limits, and credit balance |
 | `/setkey <key>` | add your own unblocker key for bot-protected stores (`/providers` lists the options) |
 | `/help` | the short version of this |

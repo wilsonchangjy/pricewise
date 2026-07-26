@@ -18,6 +18,7 @@ import { formatHistory } from "../_shared/history.mjs";
 import { CATEGORIES, detectCategory, normalizeCategory } from "../_shared/category.mjs";
 import { matchVariant } from "../_shared/variants.mjs";
 import { PROVIDERS, DEFAULT_PROVIDER, normalizeProvider, detectProvider, providerSummary } from "../_shared/providers.mjs";
+import { storesMessage } from "../_shared/stores.mjs";
 import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard,
   confirmRemoveKeyboard, backToItemKeyboard, targetKeyboard, prefsKeyboard,
@@ -68,6 +69,7 @@ const HELP = [
   "",
   "/list — your items. Tap one to set its size, a price-drop target, how often I check,",
   "   to see its price history, or to remove it.",
+  "/stores — which shops I can track, and which need a key.",
   "/prefs — your defaults, limits, and unblocker credits.",
   "/setkey <key> — add your own unblocker key for bot-protected stores.",
   "   (I delete that message from the chat the moment I read it — /providers lists the options.)",
@@ -174,6 +176,7 @@ async function handle(msg, chatId, fromId) {
     case "setevery":return setDefaultEvery(user, chatId, intent.value);
     case "setkey":  return setKey(user, chatId, intent.key, intent.providerWord);
     case "providers": return showProviders(chatId);
+    case "stores":  return reply(chatId, storesMessage());
     default:        return reply(chatId, intent.message ?? "Unknown command. Try /help.");
   }
 }
