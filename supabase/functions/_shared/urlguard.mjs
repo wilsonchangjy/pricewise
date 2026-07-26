@@ -18,6 +18,9 @@ const TRACKING_PARAMS = [
   /^utm_/i,
   /^(fbclid|gclid|gclsrc|dclid|msclkid|yclid|twclid|ttclid|igshid|epik|li_fat_id)$/i,
   /^(mc_cid|mc_eid|srsltid|_gl|cmpid|s_kwcid|irclickid|rtid)$/i,
+  // Google Ads' newer pair, and the flag retail apps bolt onto share links —
+  // both rode straight through and split one product into two rows.
+  /^(gad_source|gad_campaignid|gbraid|wbraid|is_retargeting)$/i,
   // Shopify search context — two people finding the same item different ways
   // would otherwise create two product rows. `variant` is NOT junk: it names a size.
   /^(_pos|_fid|_ss|_sid|pr_prod_strat|pr_rec_id|pr_ref_pid|pr_seq)$/i,
@@ -59,9 +62,27 @@ function canonicalEbay(u) {
   return `https://www.ebay.com/itm/${m[1]}${variation ? `?var=${encodeURIComponent(variation)}` : ""}`;
 }
 
+/**
+ * Cettire and NET-A-PORTER both put the whole product identity in the PATH — a
+ * base64 token and a numeric id respectively — so every query parameter is
+ * disposable. Dropping them wholesale is what makes an ad link and a clean link
+ * land on one product row instead of two we'd both pay to check.
+ */
+function canonicalPathOnly(u, pattern) {
+  return pattern.test(u.pathname) ? `${u.origin}${u.pathname}` : null;
+}
+
 /** @param {string} raw @returns {string} */
 export function normalizeUrl(raw) {
   const u = new URL(raw);
+  if (/(^|\.)cettire\.com$/i.test(u.hostname)) {
+    const canon = canonicalPathOnly(u, /\/products\/[^/]+\/[^/]+/);
+    if (canon) return canon;
+  }
+  if (/(^|\.)net-a-porter\.com$/i.test(u.hostname)) {
+    const canon = canonicalPathOnly(u, /\/shop\/product\/.+\/\d{6,}/);
+    if (canon) return canon;
+  }
   if (/(^|\.)ebay\.[a-z.]{2,6}$/i.test(u.hostname)) {
     const canon = canonicalEbay(u);
     if (canon) return canon;

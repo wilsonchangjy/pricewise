@@ -68,9 +68,24 @@ export function resolveSelector(url, adapter) {
 
     case "farfetch":
     case "mrporter":
+    case "netaporter":
       // Sizes arrive as JSON-LD hasVariant, and each COLOURWAY is its own URL,
       // so the link already pins the colour and the page supplies the sizes.
       return { ok: true, selector: {}, watching: "every size in this colour" };
+
+    case "cettire": {
+      // The product token is the last path segment; everything else in the link
+      // is advertising. Prices come back in USD even on a /sg/ URL.
+      const token = (u.pathname.match(/\/products\/[^/]+\/([^/?#]+)/) || [])[1];
+      if (!token) {
+        return { ok: false, reason: "that Cettire link is missing its product id — open the item and copy the URL from the address bar" };
+      }
+      return {
+        ok: true,
+        selector: { token: decodeURIComponent(token) },
+        watching: "every size on the page — prices come back in USD",
+      };
+    }
 
     case "shopify": {
       // Shopify puts the chosen size in ?variant=. Ignoring it meant tracking

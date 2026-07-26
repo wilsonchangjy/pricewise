@@ -16,6 +16,8 @@ import { readAmazon } from "./amazon.mjs";
 import { readFarfetch } from "./farfetch.mjs";
 import { readMrPorter } from "./mrporter.mjs";
 import { readEbay } from "./ebay.mjs";
+import { readCettire } from "./cettire.mjs";
+import { readNetaporter } from "./netaporter.mjs";
 import { readJsonLd } from "./jsonld.mjs";
 
 const READERS = {
@@ -34,6 +36,8 @@ const READERS = {
   farfetch: readFarfetch,
   mrporter: readMrPorter,
   ebay: readEbay,
+  cettire: readCettire,
+  netaporter: readNetaporter,
   jsonld: readJsonLd,
 };
 
