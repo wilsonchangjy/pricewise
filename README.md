@@ -38,20 +38,20 @@ the code, not written twice.
 These block bots, so checks run through an unblocker on **your** credits — up to
 5 such items. The bot quotes the monthly cost before you commit to one.
 
-| Store | Per check | Checked | Notes |
-|---|---|---|---|
-| **Amazon** | 1 credit | 6h | each size is its own listing, so the link pins your size |
-| **eBay** | 1 credit | 6h | fixed-price listings only; prices in USD |
-| **ASOS** | 1 credit | 6h | |
-| **Bershka** | 1 credit | 6h | |
-| **Stradivarius** | 1 credit | 6h | |
-| **& Other Stories** | 1 credit | 6h | |
+| Store | Per check | Notes |
+|---|---|---|
+| **Amazon** | 1 credit | each size is its own listing, so the link pins your size |
+| **eBay** | 1 credit | fixed-price listings only; prices in USD |
+| **ASOS** | 1 credit | |
+| **Bershka** | 1 credit | |
+| **Stradivarius** | 1 credit | |
+| **& Other Stories** | 1 credit | |
 | **Farfetch** | 1 credit | 6h | |
-| **Massimo Dutti & Oysho** | 5 credits | daily | |
-| **Zara** | 10 credits | daily | |
-| **MR PORTER** | 10 credits | daily | prices in GBP |
-| **NET-A-PORTER** | 10 credits | daily | prices in USD |
-| **Cettire** | 10 credits | daily | prices in USD |
+| **Massimo Dutti & Oysho** | 5 credits | |
+| **Zara** | 10 credits | |
+| **MR PORTER** | 10 credits | prices in GBP |
+| **NET-A-PORTER** | 10 credits | prices in USD |
+| **Cettire** | 10 credits | prices in USD |
 
 `/providers` lists the unblocker services that work and their free tiers — some
 renew monthly, which matters more than the headline number.
