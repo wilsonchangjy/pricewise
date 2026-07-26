@@ -73,6 +73,11 @@ export function resolveSelector(url, adapter) {
       // so the link already pins the colour and the page supplies the sizes.
       return { ok: true, selector: {}, watching: "every size in this colour" };
 
+    case "end":
+      // Sold-out sizes are absent from END's payload, so the picker can only
+      // offer what's buyable now; a tracked size that vanishes reads as sold out.
+      return { ok: true, selector: {}, watching: "every size END is showing" };
+
     case "cettire": {
       // The product token is the last path segment; everything else in the link
       // is advertising. Prices come back in USD even on a /sg/ URL.

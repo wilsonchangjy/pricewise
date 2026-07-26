@@ -21,6 +21,9 @@ const TRACKING_PARAMS = [
   // Google Ads' newer pair, and the flag retail apps bolt onto share links —
   // both rode straight through and split one product into two rows.
   /^(gad_source|gad_campaignid|gbraid|wbraid|is_retargeting)$/i,
+  // Algolia's search-analytics ids, which END and others append when you arrive
+  // from site search — same product, different link.
+  /^(queryID|objectID|indexName)$/i,
   // Shopify search context — two people finding the same item different ways
   // would otherwise create two product rows. `variant` is NOT junk: it names a size.
   /^(_pos|_fid|_ss|_sid|pr_prod_strat|pr_rec_id|pr_ref_pid|pr_seq)$/i,

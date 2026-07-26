@@ -25,6 +25,7 @@ const HOST_MAP = [
   [/(?:^|\.)ebay\.[a-z.]{2,6}$/i, "ebay"],
   [/(?:^|\.)cettire\.com$/i, "cettire"],
   [/(?:^|\.)net-a-porter\.com$/i, "netaporter"],
+  [/(?:^|\.)endclothing\.com$/i, "end"],
 ];
 
 // Adapters that must go through the unblocker (credits). Everything else is free.
