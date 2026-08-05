@@ -26,6 +26,7 @@ import { isBuyable } from "./stock.mjs";
 import { aiSearch } from "./ai.mjs";
 import { searchableStores, isFree } from "./stores.mjs";
 import { localeFromUrl } from "./locale.mjs";
+import { resolveSelector, resolveFromPage } from "./resolve.mjs";
 
 /** Present at most this many. More is a menu, not an answer. */
 export const MAX_CANDIDATES = 3;
@@ -249,7 +250,17 @@ export async function verifyCandidates(candidates, ctx = {}, acc = null) {
     .slice(0, ctx.maxDefendedReads ?? MAX_DEFENDED_READS);
 
   const readings = await Promise.all([...free, ...paid].map(async (d) => {
-    const reading = await selectAdapter(d.adapter)({ url: d.url, label: d.hint }, ctx).catch(() => null);
+    // Resolve the ids the adapter needs FROM THE URL, exactly as /add does.
+    // Skipping this was a silent, whole-category failure: Uniqlo wants a
+    // productCode, the Inditex brands want store/catalog/product ids, and
+    // without them their readers refuse with "missing variantSelector". Every
+    // search result we ever produced came from an adapter that happens to work
+    // off the URL alone (Shopify, Woo, END, the JSON-LD readers) — the rest
+    // looked like "couldn't find it" when they were never actually asked.
+    const item = await resolveItem(d, ctx);
+    if (!item) return null;
+
+    const reading = await selectAdapter(d.adapter)(item, ctx).catch(() => null);
     if (!reading?.ok) return null;
     return {
       url: d.url, adapter: d.adapter, reading, hint: d.hint,
@@ -263,6 +274,33 @@ export async function verifyCandidates(candidates, ctx = {}, acc = null) {
 
   out.push(...readings.filter(Boolean));
   return out;
+}
+
+/**
+ * Turn a candidate URL into the Item an adapter actually expects — the same
+ * two-step /add performs: read what the URL alone can tell us, and fetch the
+ * page for the rest when the adapter says it needs to.
+ *
+ * Returns null when the ids can't be resolved, which is a real "can't track
+ * this" and not a reading we should invent around.
+ */
+async function resolveItem(d, ctx) {
+  const res = resolveSelector(d.url, d.adapter);
+  if (!res?.ok) return null;
+
+  let selector = res.selector;
+  if (res.needsPage) {
+    const page = await resolveFromPage(d.url).catch(() => null);
+    if (!page?.ok) return null;
+    selector = { ...selector, ...page.patch };
+  }
+  return {
+    url: d.url,
+    label: d.hint,
+    variantSelector: selector,
+    // A variant named in the URL is a deliberate choice by whoever wrote it.
+    ...(res.variantId != null && { variantId: res.variantId }),
+  };
 }
 
 /**

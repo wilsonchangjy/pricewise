@@ -517,9 +517,52 @@ function inBackground(p) {
   return guarded; // local/Node: nothing to hand off to, so see it through
 }
 
+/**
+ * Fix a typo and Telegram sends the correction as a NEW update (edited_message),
+ * so both the typo and the correction ran as separate searches — two "looking
+ * for…" messages, two answers, two lots of the user's model credits. Observed
+ * live: "Smart Wide Straight Pangs" and "…Pants" both searched.
+ *
+ * The in-flight fetch can't be recalled, so instead each search stamps a token on
+ * the user's row and only reports back if that token is still the current one.
+ * The superseded search finishes quietly and its result is dropped; its "looking
+ * for…" message is deleted so the chat reads as though only the corrected query
+ * was ever sent.
+ */
 async function findItems(user, chatId, query) {
-  await reply(chatId, `🔎 Looking for “${query}” — give me a moment.`);
-  return inBackground(runSearch(user, chatId, query));
+  const previous = user.settings?.search;
+  if (previous?.ackMessageId) {
+    // A search is already running: it's now stale, so take its ack off screen.
+    await deleteMessage(BOT_TOKEN, chatId, previous.ackMessageId);
+  }
+
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const ack = await reply(chatId, `🔎 Looking for “${query}” — give me a moment.`);
+
+  const settings = {
+    ...(user.settings ?? {}),
+    search: { token, query, ackMessageId: ack?.result?.message_id ?? null },
+  };
+  user.settings = settings;
+  await db.from("users").update({ settings }).eq("id", user.id);
+
+  return inBackground(runSearch(user, chatId, query, token));
+}
+
+/** Is this search still the one the user is waiting for? */
+async function stillCurrent(user, token) {
+  const { data } = await db.from("users").select("settings").eq("id", user.id).maybeSingle();
+  return (data?.settings?.search?.token ?? null) === token;
+}
+
+/** Done reporting — drop the marker so a later edit doesn't delete a live ack. */
+async function clearSearchToken(user, token) {
+  const { data } = await db.from("users").select("settings").eq("id", user.id).maybeSingle();
+  if ((data?.settings?.search?.token ?? null) !== token) return; // someone else owns it now
+  const settings = { ...(data.settings ?? {}) };
+  delete settings.search;
+  user.settings = settings;
+  await db.from("users").update({ settings }).eq("id", user.id);
 }
 
 /**
@@ -549,7 +592,7 @@ async function shopperCountry(user) {
   return top?.[0] ?? ((Deno.env.get("PRICEWISE_COUNTRY") || "").toUpperCase() || undefined);
 }
 
-async function runSearch(user, chatId, query) {
+async function runSearch(user, chatId, query, token) {
   const [{ data: aiRows }, { data: keyRow }, country] = await Promise.all([
     db.rpc("get_user_ai_key", { p_user_id: user.id }),
     db.from("user_api_keys").select("user_id").eq("user_id", user.id).maybeSingle(),
@@ -563,6 +606,14 @@ async function runSearch(user, chatId, query) {
     country,
     max: MAX_CANDIDATES,
   });
+
+  // The user edited or re-asked while this was running — answer only the
+  // question they're actually waiting on.
+  if (token && !(await stillCurrent(user, token))) {
+    console.log(`search superseded, discarding results for "${query}"`);
+    return;
+  }
+  await clearSearchToken(user, token);
 
   if (!found.length) {
     // Say WHICH kind of nothing this is. "No results" and "your key was rejected"
