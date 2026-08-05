@@ -113,6 +113,23 @@ export function setEveryScopeKeyboard(interval) {
   };
 }
 
+/**
+ * Search results: pick one to track, or none.
+ *
+ * The URLs themselves can't ride in callback_data (64 bytes, and a Farfetch link
+ * alone is longer than that), so the buttons carry an INDEX into the candidate
+ * list parked on the user's row. Same filler-in-the-subId-slot trick as /prefs.
+ */
+export function candidateKeyboard(count) {
+  const n = Math.max(0, Math.min(Number(count) || 0, 3));
+  return {
+    inline_keyboard: [
+      Array.from({ length: n }, (_, i) => btn(`Track ${i + 1}`, `f:_:${i}`)),
+      [btn("None of these", "fx")],
+    ].filter((row) => row.length),
+  };
+}
+
 /** A button's size text — just the size, with any leading "colour X / " dropped
  *  (it's redundant on the size picker, and it was pushing the size off-screen). */
 export function variantSizeLabel(v) {

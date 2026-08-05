@@ -20,6 +20,17 @@ export function parseCommand(text) {
     return { cmd: "add", url: raw.match(URL_RE)[0] };
   }
 
+  // Anything else typed without a slash is a DESCRIPTION of something to find.
+  // This is the only unprefixed input left, so it can own the fallback — but the
+  // bounds matter: two characters is a typo, not a product, and a paragraph is
+  // someone talking to the bot rather than shopping.
+  if (!raw.startsWith("/")) {
+    if (raw.length < 3 || raw.length > 140) {
+      return { cmd: "unknown", message: "Paste a product link to track it, or describe an item and I'll look for it — e.g. \"Our Legacy Camion boots in black\". /help has the rest." };
+    }
+    return { cmd: "find", query: raw };
+  }
+
   const [word, ...rest] = raw.split(/\s+/);
   const cmd = word.toLowerCase().replace(/@.*$/, ""); // strip @botname
   const arg = rest.join(" ").trim();
@@ -90,6 +101,20 @@ export function parseCommand(text) {
     case "/shops":
     case "/sites":
       return { cmd: "stores" };
+    case "/find":
+    case "/search":
+      return arg
+        ? { cmd: "find", query: arg }
+        : { cmd: "find", message: "Describe what you're after: /find Our Legacy Camion boots in black" };
+    case "/setaikey": {
+      // Same custody as /setkey: the webhook deletes the message on receipt.
+      if (!arg) {
+        return { cmd: "setaikey", redactMessage: false,
+                 message: "Usage: /setaikey <key> — an Anthropic or OpenAI key, so I can search the web for an item you describe.\nSend /setaikey off to forget the one I'm holding." };
+      }
+      if (arg.toLowerCase() === "off") return { cmd: "setaikey", clear: true };
+      return { cmd: "setaikey", key: arg.split(/\s+/).pop(), redactMessage: true };
+    }
     case "/setkey": {
       // Secret — tell the webhook to delete the user's message from the chat.
       if (!arg) {

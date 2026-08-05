@@ -29,7 +29,36 @@ test("list/remove/help/unknown", () => {
   assert.equal(parseCommand("/list").cmd, "list");
   assert.equal(parseCommand("/remove 2").ref, "2");
   assert.equal(parseCommand("/start").cmd, "help");
-  assert.equal(parseCommand("hello there").cmd, "unknown");
+  assert.equal(parseCommand("/nope").cmd, "unknown");
+});
+
+// Plain text used to be "unknown". It now owns the unprefixed fallback — the
+// only other unprefixed input is a URL, which is caught above it.
+test("typing a description is a search, not an unknown command", () => {
+  const i = parseCommand("Our Legacy Camion boots in black");
+  assert.equal(i.cmd, "find");
+  assert.equal(i.query, "Our Legacy Camion boots in black");
+  assert.equal(parseCommand("/find camion boots").query, "camion boots");
+});
+
+test("a stray keystroke or a paragraph is not a search", () => {
+  assert.equal(parseCommand("ok").cmd, "unknown", "two characters is a typo, not a product");
+  assert.equal(parseCommand("a".repeat(200)).cmd, "unknown", "that's someone talking, not shopping");
+  // …and the refusal still says what the bot is for.
+  assert.match(parseCommand("ok").message, /describe an item/);
+});
+
+test("/setaikey is a secret, and can be revoked", () => {
+  const set = parseCommand("/setaikey sk-ant-api03-abc");
+  assert.equal(set.cmd, "setaikey");
+  assert.equal(set.key, "sk-ant-api03-abc");
+  assert.equal(set.redactMessage, true, "a model key must never linger in the chat");
+
+  const off = parseCommand("/setaikey off");
+  assert.equal(off.clear, true);
+  assert.ok(!off.key);
+
+  assert.equal(parseCommand("/setaikey").redactMessage, false, "nothing secret in a bare usage error");
 });
 
 test("retired /pause and /resume no longer route — they fall through to unknown", () => {

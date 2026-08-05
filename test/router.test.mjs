@@ -87,3 +87,19 @@ test("mrporter routes by host, bot-protected, priced at the super tier", async (
   assert.equal(ADAPTER_TIER.mrporter, "super");
   assert.equal(monthlyCredits("super", TIER_INTERVAL_MIN.super), 300);
 });
+
+// The model-search prompt NAMES domains rather than matching them, so the named
+// list and the routing table have to be the same list. A domain we advertise but
+// can't route sends the model somewhere we'd then refuse — a wrong answer that
+// looks like a working feature.
+test("every host we name to a model is a host we actually route", async () => {
+  const { KNOWN_HOSTS, HOST_MAP } = await import("../supabase/functions/_shared/router.mjs");
+  const dead = fakeFetch();
+  for (const [host, adapter] of KNOWN_HOSTS) {
+    const got = await detectAdapter(`https://www.${host}/x/y`, { fetchImpl: dead });
+    assert.equal(got.adapter, adapter, `${host} should route to ${adapter}`);
+  }
+  const named = new Set(KNOWN_HOSTS.map(([, a]) => a));
+  const routed = new Set(HOST_MAP.map(([, a]) => a));
+  assert.deepEqual([...routed].filter((a) => !named.has(a)), [], "a routed brand left unnamed");
+});

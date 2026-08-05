@@ -15,6 +15,7 @@ just "is it in stock somewhere."
 - 🔗 Every alert links straight to the product so you can grab it.
 - 🎯 Optional **target price** — only ping me below $X.
 - 💬 All on **Telegram** — add an item by pasting its link to the bot.
+- 🔎 **Don't have the link?** Describe the item and the bot goes looking for it.
 
 ## Supported stores
 
@@ -94,10 +95,12 @@ tap it in your list to change anything about it.
 | Command | What it does |
 |---|---|
 | paste a URL / `/add <url>` | start tracking an item |
+| describe an item | *"Our Legacy Camion boots in black"* — the bot searches, shows what it found, you tap one to track |
 | `/list` | your items — **tap one** to set its size, a price-drop target, how often it's checked, see its history, or remove it |
 | `/stores` | which shops are supported, and which need a key |
 | `/prefs` | your default size and check frequency, limits, and credit balance |
 | `/setkey <key>` | add your own unblocker key for bot-protected stores (`/providers` lists the options) |
+| `/setaikey <key>` | add an Anthropic or OpenAI key so the bot can search the web for an item you describe |
 | `/help` | the short version of this |
 
 Everything on an item is a tap, not a command to memorise — the size picker shows
@@ -108,6 +111,26 @@ everything at once (or just the bot-protected ones that spend your credits).
 Small price moves are ignored on purpose: a drop has to be at least **5% and 2
 currency units** before it's worth interrupting you. A price target you set always
 alerts, however small the step.
+
+## Finding an item without the link
+
+Type what you're after instead of a URL and the bot goes looking, then shows you
+at most three results to pick from.
+
+It searches in two steps, cheapest first:
+
+1. **Free, for everyone.** It guesses the brand's own shop from your words and
+   asks that shop's search engine. Good for *"goshopia scarlett dress"*; useless
+   for *"black leather chelsea boots"*, because it has no shop to ask.
+2. **Your own model key** (`/setaikey`, Anthropic or OpenAI), and only when step 1
+   found nothing. A model with web search answers *which shops stock this* — the
+   question step 1 structurally can't. Costs a few cents a search, on your account.
+
+**Every result is read through the same adapters as a pasted link before you see
+it.** The searcher only ever suggests URLs — the price and stock lines come from
+the product page itself, fetched at that moment. A made-up product page fails to
+load and gets dropped, so the worst case is "found nothing", never a price that
+was never real.
 
 ## Self-hosting
 

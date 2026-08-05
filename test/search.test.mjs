@@ -77,3 +77,80 @@ test("the pipeline verifies every candidate and caps the list", async () => {
   // suggested URL that we cannot verify must never reach the user.
   assert.equal(out.length, 0);
 });
+
+// ── the model source ────────────────────────────────────────────────────────
+// It costs the user real money, so WHEN it runs is as much a design decision as
+// what it returns.
+
+test("no model key means no model source — the free path is the whole pipeline", async () => {
+  const { sourcesFor, storeSearchSource } = await import("../supabase/functions/_shared/search.mjs");
+  assert.deepEqual(sourcesFor({}), [storeSearchSource]);
+  assert.equal(sourcesFor({ ai: { apiKey: "sk-ant-x" } }).length, 2);
+});
+
+// Adapters reach the network through fetcher.httpGet, which takes no injectable
+// fetch — so an adapter READ (as opposed to detection) can only be held offline
+// by swapping the global. Worth doing rather than skipping: without it these
+// tests would quietly depend on shop.test resolving, and one earlier version of
+// this file spent 20s per assertion waiting on a real timeout.
+async function offline(routes, fn) {
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const hit = Object.entries(routes).find(([frag]) => String(url).includes(frag));
+    return hit
+      ? { ok: true, status: 200, url: String(url), headers: new Headers(), text: async () => hit[1] }
+      : { ok: false, status: 404, url: String(url), headers: new Headers(), text: async () => "" };
+  };
+  try { return await fn(globalThis.fetch); } finally { globalThis.fetch = real; }
+}
+
+const SHOPIFY_PRODUCT = JSON.stringify({
+  title: "Found Free", price: 4500,
+  variants: [{ id: 1, title: "M", available: true, price: 4500 }],
+});
+
+// The stopping condition is "enough VERIFIED results", not "a source answered" —
+// a free hit that turns out to be a dead page must still fall through to the
+// model the user is paying for, and a free hit that reads must not bill them.
+test("a free hit that VERIFIES means the model is never billed", async () => {
+  const { findProduct } = await import("../supabase/functions/_shared/search.mjs");
+  let modelCalls = 0;
+  const free = async () => ([{ url: "https://shop.test/products/a", hint: "found free" }]);
+  const paid = async () => { modelCalls++; return []; };
+
+  const out = await offline({ "/products/a.js": SHOPIFY_PRODUCT }, (f) =>
+    findProduct("anything", { sources: [free, paid], max: 1, fetchImpl: f }));
+
+  assert.equal(out.length, 1, "a real, readable product page");
+  assert.equal(modelCalls, 0, "a readable free hit must not spend the user's model credits");
+});
+
+test("a free hit that turns out to be unreadable still falls through to the model", async () => {
+  const { findProduct } = await import("../supabase/functions/_shared/search.mjs");
+  let modelCalls = 0;
+  const free = async () => ([{ url: "https://shop.test/products/ghost", hint: "" }]);
+  const paid = async () => { modelCalls++; return []; };
+
+  await offline({}, (f) => findProduct("anything", { sources: [free, paid], fetchImpl: f }));
+  assert.equal(modelCalls, 1, "returning a dead URL is not the same as delivering");
+});
+
+test("the model source reports WHY it failed instead of looking like 'no results'", async () => {
+  const { aiSearchSource } = await import("../supabase/functions/_shared/search.mjs");
+  const hits = await aiSearchSource("camion boots", {
+    ai: { apiKey: "sk-ant-x", provider: "anthropic" },
+    aiFetchImpl: async () => ({ ok: false, status: 401, text: async () => "{}" }),
+  });
+  assert.deepEqual([...hits], []);
+  assert.match(hits.note, /key was rejected/);
+});
+
+test("a model's suggestions are verified like anyone else's — no shortcut", async () => {
+  const { findProduct } = await import("../supabase/functions/_shared/search.mjs");
+  // A perfectly plausible, entirely fictional product page on a real brand's
+  // real shop. (Kept to a free-platform host so the fake fetch governs it —
+  // a bot-protected host would send the adapter to the live network.)
+  const paid = async () => ([{ url: "https://www.ourlegacy.com/products/camion-boot-black", hint: "Camion Boots" }]);
+  const out = await offline({}, (f) => findProduct("our legacy camion boots", { sources: [paid], fetchImpl: f }));
+  assert.equal(out.length, 0, "unreadable is unreportable, whoever suggested it");
+});

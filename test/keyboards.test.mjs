@@ -4,7 +4,7 @@ import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard, confirmRemoveKeyboard,
   targetKeyboard, setEveryIntervalKeyboard, setEveryScopeKeyboard,
   prefsKeyboard, prefsSizeCategoryKeyboard,
-  colourKeyboard, variantColours, variantSizeLabel,
+  colourKeyboard, variantColours, variantSizeLabel, candidateKeyboard,
 } from "../supabase/functions/_shared/keyboards.mjs";
 
 const allData = (kb) => kb.inline_keyboard.flat().map((b) => b.callback_data);
@@ -123,4 +123,23 @@ test("/prefs offers both default-sizes and check-frequency, and the size flow pi
 
 test("every-keyboard offers exactly the supported intervals", () => {
   assert.deepEqual(allData(everyKeyboard(2)), ["E:2:3h", "E:2:6h", "E:2:12h", "E:2:1d", "i:2"]);
+});
+
+// A product URL is longer than callback_data's 64-byte cap, so search results
+// are addressed by INDEX into the list parked on the user's row.
+test("search-result buttons carry an index, never a URL", () => {
+  const k = candidateKeyboard(3);
+  const datas = k.inline_keyboard.flat().map((b) => b.callback_data);
+  assert.deepEqual(datas, ["f:_:0", "f:_:1", "f:_:2", "fx"]);
+  for (const d of datas) assert.ok(new TextEncoder().encode(d).length <= 64);
+
+  const parsed = parseCallback("f:_:2");
+  assert.equal(parsed.action, "f");
+  assert.equal(parsed.arg, "2");
+  assert.equal(parsed.subId, undefined, "no subscription exists yet — nothing to own");
+});
+
+test("the candidate list is capped, and always offers a way out", () => {
+  assert.equal(candidateKeyboard(9).inline_keyboard[0].length, 3, "3 options is an answer; more is a menu");
+  assert.deepEqual(candidateKeyboard(0).inline_keyboard, [[{ text: "None of these", callback_data: "fx" }]]);
 });

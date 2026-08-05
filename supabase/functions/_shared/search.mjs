@@ -14,13 +14,17 @@
 //   storeSearch  — free. A shop's own search endpoint. Needs to know WHICH shop,
 //                  which is the whole limitation: 5M Shopify stores, and a
 //                  description rarely names the domain.
-//   (later) web  — a model with web search. Handles "who even stocks this?",
-//                  which the free path structurally cannot answer.
+//   aiSearch     — the user's own model key, with web search. Answers "who even
+//                  stocks this?", which the free path structurally cannot. Costs
+//                  the user a few cents a query, so it runs SECOND — only when
+//                  the free path came back empty.
 
 import { detectAdapter } from "./router.mjs";
 import { selectAdapter } from "./adapters/index.mjs";
 import { normalizeUrl, assertSafeUrl } from "./urlguard.mjs";
 import { isBuyable } from "./stock.mjs";
+import { aiSearch } from "./ai.mjs";
+import { searchableStores } from "./stores.mjs";
 
 /** Present at most this many. More is a menu, not an answer. */
 export const MAX_CANDIDATES = 3;
@@ -138,9 +142,11 @@ export function guessesWithRemainder(query) {
  *
  * @returns {Promise<{url:string, reading:object, adapter:string}[]>}
  */
-export async function verifyCandidates(candidates, ctx = {}) {
-  const seen = new Set();
-  const out = [];
+export async function verifyCandidates(candidates, ctx = {}, acc = null) {
+  // `acc` lets a caller verify in waves without re-reading a page it already
+  // read — findProduct uses it to check the free source's hits BEFORE deciding
+  // whether the paid one is worth running.
+  const { seen, out } = acc ?? { seen: new Set(), out: [] };
   for (const c of candidates) {
     if (out.length >= (ctx.max ?? MAX_CANDIDATES) * 2) break; // verify a few spare
     let url;
@@ -200,14 +206,38 @@ export function rankCandidates(verified, { size } = {}) {
  * anything here — and so the tests never hit the network.
  */
 export async function findProduct(query, ctx = {}) {
-  const sources = ctx.sources ?? [storeSearchSource];
-  const found = [];
+  const sources = ctx.sources ?? sourcesFor(ctx);
+  const want = ctx.max ?? MAX_CANDIDATES;
+  const acc = { seen: new Set(), out: [] };
+  const notes = [];
+
+  // Verify after EACH source, not once at the end. The stopping condition that
+  // matters is "do we have enough readable results yet" — not "did a source
+  // return something", because a source can hand back a URL that turns out to be
+  // dead. Checking as we go means the free path stops the paid one only when it
+  // genuinely delivered, and a free hit that fails verification still falls
+  // through to the model the user is paying for.
   for (const src of sources) {
-    try { found.push(...await src(query, ctx)); } catch { /* a dead source is not fatal */ }
-    if (found.length >= MAX_CANDIDATES * 2) break;
+    try {
+      const hits = await src(query, ctx);
+      if (hits.note) notes.push(hits.note);
+      await verifyCandidates(hits, ctx, acc);
+    } catch { /* a dead source is not fatal */ }
+    if (acc.out.length >= want) break;
   }
-  const verified = await verifyCandidates(found, ctx);
-  return rankCandidates(verified, ctx).slice(0, ctx.max ?? MAX_CANDIDATES);
+
+  const ranked = rankCandidates(acc.out, ctx).slice(0, want);
+  ranked.notes = notes;
+  return ranked;
+}
+
+/**
+ * Cheapest source first, always. The free one costs a couple of HTTP requests;
+ * the model costs the user real money, so it only runs when the free path found
+ * nothing — which is exactly the case it exists for.
+ */
+export function sourcesFor(ctx = {}) {
+  return ctx.ai?.apiKey ? [storeSearchSource, aiSearchSource] : [storeSearchSource];
 }
 
 /** The free source: guess the brand's shop, ask its own search engine — with the
@@ -220,4 +250,31 @@ export async function storeSearchSource(query, ctx = {}) {
     }
   }
   return [];
+}
+
+/**
+ * The paid source: the user's own model, with web search, told which shops we
+ * can read. It returns URLs and nothing else — see ai.mjs for why that limit is
+ * the whole safety story.
+ *
+ * A failure here is REPORTED rather than swallowed: "your key was rejected" and
+ * "I couldn't find it" are different facts, and a user who can't tell them apart
+ * will keep retyping a query that was never the problem. The note rides on the
+ * returned array so the pipeline stays a plain list of candidates.
+ */
+export async function aiSearchSource(query, ctx = {}) {
+  const { provider, apiKey } = ctx.ai ?? {};
+  if (!apiKey) return [];
+
+  const res = await aiSearch(query, {
+    provider,
+    apiKey,
+    stores: searchableStores({ hasKey: Boolean(ctx.userHasUnblockerKey) }),
+    fetchImpl: ctx.aiFetchImpl ?? ctx.fetchImpl ?? fetch,
+    model: ctx.ai.model,
+  });
+
+  const hits = res.ok ? (res.candidates ?? []) : [];
+  if (!res.ok) hits.note = res.reason;
+  return hits;
 }

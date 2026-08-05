@@ -8,7 +8,7 @@
 
 // Known brands, matched on hostname. (itxrest brands still need store/catalog/
 // productId resolved from the page — see resolveHints below.)
-const HOST_MAP = [
+export const HOST_MAP = [
   [/(?:^|\.)uniqlo\.com$/i, "uniqlo"],
   [/(?:^|\.)mango\.com$/i, "mango"],
   [/(?:^|\.)cos\.com$/i, "cos"],
@@ -27,6 +27,34 @@ const HOST_MAP = [
   [/(?:^|\.)net-a-porter\.com$/i, "netaporter"],
   [/(?:^|\.)endclothing\.com$/i, "end"],
   [/(?:^|\.)ssense\.com$/i, "ssense"],
+];
+
+/**
+ * The same brands, spelled out — for anything that has to NAME a domain rather
+ * than match one. Right now that's the model-search prompt: telling a model
+ * "prefer these shops" only helps if the list is the one the router actually
+ * routes, so `router.test.mjs` asserts every host here resolves to the adapter
+ * claimed, and that no HOST_MAP entry is left unnamed.
+ */
+export const KNOWN_HOSTS = [
+  ["uniqlo.com", "uniqlo"],
+  ["mango.com", "mango"],
+  ["cos.com", "cos"],
+  ["stories.com", "stories"],
+  ["zara.com", "zara"],
+  ["massimodutti.com", "inditex"],
+  ["oysho.com", "inditex"],
+  ["stradivarius.com", "stradivarius"],
+  ["bershka.com", "bershka"],
+  ["asos.com", "asos"],
+  ["amazon.com", "amazon"],
+  ["farfetch.com", "farfetch"],
+  ["mrporter.com", "mrporter"],
+  ["ebay.com", "ebay"],
+  ["cettire.com", "cettire"],
+  ["net-a-porter.com", "netaporter"],
+  ["endclothing.com", "end"],
+  ["ssense.com", "ssense"],
 ];
 
 // Adapters that must go through the unblocker (credits). Everything else is free.

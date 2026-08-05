@@ -11,7 +11,7 @@
 // at render time — so a store can never be advertised as free after being moved
 // into DEFENDED.
 
-import { strategyFor } from "./router.mjs";
+import { strategyFor, KNOWN_HOSTS } from "./router.mjs";
 import { ADAPTER_TIER, TIER_COST, TIER_INTERVAL_MIN } from "./policy.mjs";
 
 /**
@@ -61,6 +61,22 @@ export function groupedStores() {
   };
   const all = STORES.map(decorate);
   return { free: all.filter((s) => s.free), keyed: all.filter((s) => !s.free) };
+}
+
+/**
+ * Named shops with their domains — for telling a search engine (or a model)
+ * WHERE to look. Free ones come first: a candidate we can read for nothing is
+ * worth more than one that spends the user's unblocker credits every check.
+ *
+ * `hasKey` false hides the keyed shops entirely, so someone without an unblocker
+ * key is never steered toward a shop we'd then have to refuse to track.
+ */
+export function searchableStores({ hasKey = true } = {}) {
+  const named = new Map(STORES.map((s) => [s.adapter, s.name]));
+  const rows = KNOWN_HOSTS
+    .map(([host, adapter]) => ({ host, adapter, name: named.get(adapter) ?? adapter, free: isFree(adapter) }))
+    .filter((s) => s.free || hasKey);
+  return [...rows.filter((s) => s.free), ...rows.filter((s) => !s.free)];
 }
 
 /** The /stores message. Kept plain so it reads the same everywhere. */

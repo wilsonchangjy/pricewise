@@ -25,6 +25,7 @@ read -r -d '' COMMANDS <<'JSON' || true
   {"command": "stores", "description": "Which shops I can track"},
   {"command": "prefs",  "description": "Your defaults, limits & unblocker credits"},
   {"command": "setkey", "description": "Add your own unblocker key"},
+  {"command": "setaikey", "description": "Add a model key so I can search the web"},
   {"command": "help",   "description": "How this works"}
 ]
 JSON

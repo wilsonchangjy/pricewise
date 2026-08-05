@@ -24,8 +24,10 @@ import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard,
   confirmRemoveKeyboard, backToItemKeyboard, targetKeyboard, prefsKeyboard,
   setEveryIntervalKeyboard, setEveryScopeKeyboard, prefsSizeCategoryKeyboard,
-  colourKeyboard, variantColours,
+  colourKeyboard, variantColours, candidateKeyboard,
 } from "../_shared/keyboards.mjs";
+import { findProduct, MAX_CANDIDATES } from "../_shared/search.mjs";
+import { AI_PROVIDERS, detectAiProvider } from "../_shared/ai.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
@@ -66,7 +68,8 @@ const WELCOME = [
 const HELP = [
   "🛍️ Pricewise — I watch your items and ping you when your size restocks or the price drops.",
   "",
-  "Paste a product link to start tracking it.",
+  "Paste a product link to start tracking it — or just describe the item",
+  "(\"Our Legacy Camion boots in black\") and I'll go and find it.",
   "",
   "/list — your items. Tap one to set its size, a price-drop target, how often I check,",
   "   to see its price history, or to remove it.",
@@ -74,6 +77,8 @@ const HELP = [
   "/prefs — your defaults, limits, and unblocker credits.",
   "/setkey <key> — add your own unblocker key for bot-protected stores.",
   "   (I delete that message from the chat the moment I read it — /providers lists the options.)",
+  "/setaikey <key> — an Anthropic or OpenAI key, so I can search the web when the",
+  "   free search can't tell which shop you mean. Deleted from the chat the same way.",
   "/help — this message.",
 ].join("\n");
 
@@ -176,6 +181,8 @@ async function handle(msg, chatId, fromId) {
     case "setsize": return setDefaultSize(user, chatId, intent.category, intent.value);
     case "setevery":return setDefaultEvery(user, chatId, intent.value);
     case "setkey":  return setKey(user, chatId, intent.key, intent.providerWord);
+    case "setaikey":return intent.clear ? forgetAiKey(user, chatId) : setAiKey(user, chatId, intent.key);
+    case "find":    return findItems(user, chatId, intent.query);
     case "providers": return showProviders(chatId);
     case "stores":  return reply(chatId, storesMessage());
     default:        return reply(chatId, intent.message ?? "Unknown command. Try /help.");
@@ -448,6 +455,151 @@ async function showProviders(chatId) {
   ].join("\n"));
 }
 
+// ── describe an item, and I'll go find it ────────────────────────────────────
+// The free search (a shop's own search endpoint) runs for everyone. It can only
+// query a shop it can LOCATE, so it handles "goshopia scarlett dress" and not
+// "black leather chelsea boots". A model key fills that gap on the user's own
+// account — and only when the free path came back empty, so the common case
+// stays free.
+
+async function setAiKey(user, chatId, key) {
+  const provider = detectAiProvider(key);
+  const p = provider ? AI_PROVIDERS[provider] : null;
+  if (!p || !p.keyPattern.test(String(key).trim())) {
+    return reply(chatId, [
+      "That doesn't look like an Anthropic or OpenAI key.",
+      "",
+      ...Object.values(AI_PROVIDERS).map((v) => `• ${v.label} — ${v.signup}`),
+      "",
+      "Then: /setaikey <key>. I delete that message the moment I read it.",
+    ].join("\n"));
+  }
+
+  const { error } = await db.rpc("set_user_ai_key", {
+    p_user_id: user.id, p_key: String(key).trim(), p_provider: provider,
+  });
+  if (error) throw error;
+
+  return reply(chatId, [
+    `🔑 ${p.label} key saved (encrypted) and your message deleted.`,
+    "",
+    "Now you can describe an item instead of pasting a link — try:",
+    "  Our Legacy Camion boots in black",
+    "",
+    "I search the shops I can read, show you what I actually found, and you tap one",
+    "to track it. I never quote a price I haven't read off the page myself.",
+    "It's a few cents a search on your account, and only when the free search",
+    "turns up nothing. /setaikey off to forget the key.",
+  ].join("\n"));
+}
+
+async function forgetAiKey(user, chatId) {
+  const { error } = await db.rpc("delete_user_ai_key", { p_user_id: user.id });
+  if (error) throw error;
+  return reply(chatId, "🔑 Forgotten — the key is deleted, not just unlinked. Describing an item still works on the free search; it just can't reach beyond a shop it can name.");
+}
+
+/**
+ * Telegram re-delivers any update it hasn't seen a 200 for within about a minute.
+ * A search can honestly take longer: a model turn with web search, then up to six
+ * pages read through real adapters. A retry would run the whole thing a second
+ * time and bill the user's model account twice — so this handler answers Telegram
+ * straight away and finishes the work in the background.
+ */
+function inBackground(p) {
+  const rt = (globalThis as any).EdgeRuntime;
+  const guarded = p.catch((e: unknown) => console.error("search error:", e));
+  if (rt?.waitUntil) { rt.waitUntil(guarded); return; }
+  return guarded; // local/Node: nothing to hand off to, so see it through
+}
+
+async function findItems(user, chatId, query) {
+  await reply(chatId, `🔎 Looking for “${query}” — give me a moment.`);
+  return inBackground(runSearch(user, chatId, query));
+}
+
+async function runSearch(user, chatId, query) {
+  const [{ data: aiRows }, { data: keyRow }] = await Promise.all([
+    db.rpc("get_user_ai_key", { p_user_id: user.id }),
+    db.from("user_api_keys").select("user_id").eq("user_id", user.id).maybeSingle(),
+  ]);
+  const ai = Array.isArray(aiRows) ? aiRows[0] : aiRows;
+
+  const found = await findProduct(query, {
+    ai: ai?.api_key ? { apiKey: ai.api_key, provider: ai.provider } : undefined,
+    userHasUnblockerKey: Boolean(keyRow),
+    max: MAX_CANDIDATES,
+  });
+
+  if (!found.length) {
+    // Say WHICH kind of nothing this is. "No results" and "your key was rejected"
+    // need different things from the user, and one message for both teaches them
+    // to distrust the feature.
+    const note = (found.notes ?? [])[0];
+    return reply(chatId, [
+      note ? `I couldn't complete that search — ${note}.` : `I couldn't find “${query}” anywhere I can read.`,
+      "",
+      ...(note ? [] : [
+        ai?.api_key
+          ? "Naming the brand and the product usually helps (\"Our Legacy Camion boots\" rather than \"black leather boots\")."
+          : "Right now I can only search a shop I can name from your words. /setaikey <key> lets me search the web with your own Anthropic or OpenAI key.",
+      ]),
+      "If you can find the product page yourself, paste the link and I'll track it from there.",
+    ].filter(Boolean).join("\n"));
+  }
+
+  // Park the URLs on the user's row: callback_data is 64 bytes and a single
+  // Farfetch link is longer than that, so the buttons carry an index into this.
+  const candidates = found.map((c) => ({
+    url: c.url,
+    title: String(c.reading?.title || c.hint || labelFromUrl(c.url)),
+  }));
+  const settings = { ...(user.settings ?? {}), pending: { action: "find", query, candidates } };
+  await db.from("users").update({ settings }).eq("id", user.id);
+
+  const lines = found.map((c, i) => {
+    const r = c.reading;
+    const bits = [];
+    if (r?.price != null) bits.push(fmt(Number(r.price), r.currency));
+    bits.push(r?.available ? "in stock" : "sold out");
+    return `${i + 1}. ${candidates[i].title}\n   ${bits.join(" · ")}\n   ${c.url}`;
+  });
+
+  return sendMessage(BOT_TOKEN, chatId, [
+    found.length === 1 ? "Found one I can read:" : `Found ${found.length} I can read:`,
+    "",
+    ...lines,
+    "",
+    "Every price and stock line above I read off the page just now — nothing here is",
+    "a guess. Tap one to start tracking it.",
+  ].join("\n"), { keyboard: candidateKeyboard(found.length) });
+}
+
+async function trackCandidate(user, chatId, messageId, cqId, arg) {
+  const pending = user.settings?.pending;
+  const i = Number(arg);
+  const pick = pending?.action === "find" ? pending.candidates?.[i] : null;
+  if (!pick) {
+    await answerCallback(BOT_TOKEN, cqId, "That search has expired — describe it again.");
+    return;
+  }
+  await clearPending(user);
+  await answerCallback(BOT_TOKEN, cqId, "Adding…");
+  // Drop the buttons so the same result can't be tapped twice. Telegram keeps the
+  // old keyboard unless it's explicitly replaced, so an EMPTY one is the removal.
+  await editMessage(BOT_TOKEN, chatId, messageId, `Tracking: ${pick.title}\n${pick.url}`,
+    { keyboard: { inline_keyboard: [] } });
+  return addItem(user, chatId, pick.url);
+}
+
+async function dismissCandidates(user, chatId, messageId, cqId) {
+  await clearPending(user);
+  await answerCallback(BOT_TOKEN, cqId);
+  return editMessage(BOT_TOKEN, chatId, messageId,
+    "No problem — nothing added.\n\nTry naming the brand and the product, or paste the link if you find it yourself.",
+    { keyboard: { inline_keyboard: [] } });
+}
+
 // ── /size ── pick ONE variant to watch, after the fact ───────────────────────
 // Many shops (COS, Mango, most Shopify stores) don't put the size in the URL at
 // all, so /add can only watch the whole product. This is how you narrow it: we
@@ -593,6 +745,8 @@ async function buildPrefsText(user) {
     .select("id", { count: "exact", head: true }).eq("user_id", user.id);
   const { data: keyRow } = await db.from("user_api_keys")
     .select("provider, credits_remaining, credits_seen_at").eq("user_id", user.id).maybeSingle();
+  const { data: aiRow } = await db.from("user_ai_keys")
+    .select("provider").eq("user_id", user.id).maybeSingle();
 
   const sizeLines = CATEGORIES.map((c) => `• ${c}: ${sizes[c] ? sizes[c] : "not set"}`);
 
@@ -615,6 +769,11 @@ async function buildPrefsText(user) {
       : keyRow
       ? ["", `🔑 ${PROVIDERS[keyRow.provider]?.label ?? keyRow.provider} key saved`]
       : []),
+    "",
+    "🔎 Describing an item instead of pasting a link",
+    aiRow
+      ? `• on — ${AI_PROVIDERS[aiRow.provider]?.label ?? aiRow.provider}, used only when the free search can't tell which shop you mean (/setaikey off to stop)`
+      : "• free search only — I can look inside a shop I can name from your words, but not find the shop itself. /setaikey <Anthropic or OpenAI key> lifts that.",
   ].join("\n");
 }
 
@@ -786,6 +945,10 @@ async function handleCallback(cq) {
     case "Pf": return applyDefaultEvery(user, chatId, messageId, cq.id, "free", arg);
     case "Pd": return applyDefaultEvery(user, chatId, messageId, cq.id, "def", arg);
     case "Pa": return applyDefaultEvery(user, chatId, messageId, cq.id, "both", arg);
+    // Search results: the button carries an index into the candidates parked on
+    // the user's row, so there's no subscription to own yet.
+    case "f":  return trackCandidate(user, chatId, messageId, cq.id, arg);
+    case "fx": return dismissCandidates(user, chatId, messageId, cq.id);
   }
 
   const sub = subId === undefined ? null : await ownedSub(user.id, subId);
