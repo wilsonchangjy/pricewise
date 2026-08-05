@@ -209,6 +209,10 @@ async function checkProduct(product) {
     status: "active",
     next_check_at: minutesFromNow(effectiveInterval),
     ...(betterTitle ? { title: betterTitle } : {}),
+    // Carry the currency onto the product so /list can print "SGD 59.90"
+    // without joining the latest reading. Two LEMAIRE bags read 1450 and 870 —
+    // USD and GBP — and rendered identically without it.
+    ...(reading.currency ? { currency: reading.currency } : {}),
     ...(reading.tier
       ? {
           unblocker_tier: reading.tier,

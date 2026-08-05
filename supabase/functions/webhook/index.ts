@@ -15,6 +15,7 @@ import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve
 import { cleanUrl } from "../_shared/urlguard.mjs";
 import { expandUrl, isShortLink } from "../_shared/expand.mjs";
 import { formatHistory } from "../_shared/history.mjs";
+import { fmt } from "../_shared/alerting.mjs";
 import { CATEGORIES, detectCategory, normalizeCategory } from "../_shared/category.mjs";
 import { matchVariant } from "../_shared/variants.mjs";
 import { PROVIDERS, DEFAULT_PROVIDER, normalizeProvider, detectProvider, providerSummary } from "../_shared/providers.mjs";
@@ -323,7 +324,7 @@ async function addItem(user, chatId, rawUrl) {
 async function subscriptionList(userId) {
   const { data } = await db
     .from("subscriptions")
-    .select("id, status, target_price, last_alert_price, tracked_products(id, url, title, fetch_strategy)")
+    .select("id, status, target_price, last_alert_price, tracked_products(id, url, title, fetch_strategy, currency)")
     .eq("user_id", userId)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
@@ -337,8 +338,8 @@ async function listItems(user, chatId) {
   const lines = subs.map((s, i) => {
     const p = s.tracked_products;
     const bits = [];
-    if (s.last_alert_price != null) bits.push(`now ${s.last_alert_price}`);
-    if (s.target_price != null) bits.push(`target ${s.target_price}`);
+    if (s.last_alert_price != null) bits.push(`now ${fmt(Number(s.last_alert_price), p.currency)}`);
+    if (s.target_price != null) bits.push(`target ${fmt(Number(s.target_price), p.currency)}`);
     if (s.status === "paused") bits.push("paused");
     if (p.fetch_strategy === "unblocker") bits.push("daily/your key");
     return `${i + 1}. ${p.title}${bits.length ? `\n   ${bits.join(" · ")}` : ""}\n   ${p.url}`;
@@ -835,7 +836,7 @@ async function handleCallback(cq) {
 async function ownedSub(userId, subId) {
   const { data } = await db
     .from("subscriptions")
-    .select("id, status, target_price, last_alert_price, variant_id, variant_label, interval_minutes, tracked_products(id, url, title, fetch_strategy)")
+    .select("id, status, target_price, last_alert_price, variant_id, variant_label, interval_minutes, tracked_products(id, url, title, fetch_strategy, currency)")
     .eq("id", subId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -868,8 +869,8 @@ async function renderItem(sub, chatId, messageId, cqId) {
   const bits = [
     sub.variant_label ? `Watching: ${sub.variant_label}` : "Watching: every size",
     `Checked every ${intervalWord(sub.interval_minutes ?? FREE_INTERVAL_MIN)}`,
-    sub.last_alert_price != null ? `Last seen at ${sub.last_alert_price}` : null,
-    sub.target_price != null ? `Alerting below ${sub.target_price}` : null,
+    sub.last_alert_price != null ? `Last seen at ${fmt(Number(sub.last_alert_price), p.currency)}` : null,
+    sub.target_price != null ? `Alerting below ${fmt(Number(sub.target_price), p.currency)}` : null,
     sub.status === "paused" ? "Currently muted" : null,
   ].filter(Boolean);
 
