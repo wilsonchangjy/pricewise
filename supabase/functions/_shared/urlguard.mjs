@@ -26,7 +26,11 @@ const TRACKING_PARAMS = [
   /^(queryID|objectID|indexName)$/i,
   // Shopify search context — two people finding the same item different ways
   // would otherwise create two product rows. `variant` is NOT junk: it names a size.
-  /^(_pos|_fid|_ss|_sid|pr_prod_strat|pr_rec_id|pr_ref_pid|pr_seq)$/i,
+  // `_psid`/`_psq` come off the PREDICTIVE-search endpoint, which is the one our
+  // own describe-an-item search calls: `_psid` is a per-search session id, so
+  // without these every single search would mint a brand-new product row for a
+  // page we might already be tracking, and pay to fetch it separately forever.
+  /^(_pos|_fid|_ss|_sid|_psid|_psq|pr_prod_strat|pr_rec_id|pr_ref_pid|pr_seq)$/i,
 ];
 
 /**

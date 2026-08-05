@@ -29,6 +29,12 @@ import { searchableStores } from "./stores.mjs";
 /** Present at most this many. More is a menu, not an answer. */
 export const MAX_CANDIDATES = 3;
 
+/** Per-request cap for a guessed shop, and a budget for guessing as a whole.
+ *  Most guessed domains don't exist, and the free path is the thing standing
+ *  between the user and the paid one — it has to fail FAST, not thoroughly. */
+const SHOP_TIMEOUT_MS = 5_000;
+const GUESS_BUDGET_MS = 12_000;
+
 /** Shops whose search we can query for free, by platform. */
 const SHOPIFY_SUGGEST = (origin, q) =>
   `${origin}/search/suggest.json?q=${encodeURIComponent(q)}&resources%5Btype%5D=product&resources%5Blimit%5D=6`;
@@ -51,12 +57,17 @@ export function longestWordsOf(query, max = 2) {
  *
  * @returns {Promise<{url:string, hint:string}[]>}
  */
-export async function searchStore(origin, query, { fetchImpl = fetch } = {}) {
+export async function searchStore(origin, query, { fetchImpl = fetch, timeoutMs = SHOP_TIMEOUT_MS } = {}) {
   const get = async (u) => {
+    // A guessed domain usually doesn't exist, and an unanswered TCP connect can
+    // hang far longer than the whole search is worth. Measured: without this, a
+    // miss on "Our Legacy Camion boots" spent 26 seconds failing.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const r = await fetchImpl(u, { headers: { accept: "application/json" } });
+      const r = await fetchImpl(u, { headers: { accept: "application/json" }, signal: ctrl.signal });
       return r.ok ? await r.text() : null;
-    } catch { return null; }
+    } catch { return null; } finally { clearTimeout(timer); }
   };
 
   // Shopify
@@ -243,8 +254,14 @@ export function sourcesFor(ctx = {}) {
 /** The free source: guess the brand's shop, ask its own search engine — with the
  *  brand words STRIPPED, since they name the domain, not the product. */
 export async function storeSearchSource(query, ctx = {}) {
+  // Nine guessed origins × up to four requests each is a lot of waiting for a
+  // brand that turns out not to run on Shopify or Woo. Give the whole guessing
+  // phase a budget: past it, "I don't know this shop" is the answer, and the
+  // model source (if the user has one) is a better use of the next 10 seconds.
+  const deadline = Date.now() + (ctx.guessBudgetMs ?? GUESS_BUDGET_MS);
   for (const guess of guessesWithRemainder(query)) {
     for (const origin of guess.origins) {
+      if (Date.now() > deadline) return [];
       const hits = await searchStore(origin, guess.remainder, ctx);
       if (hits.length) return hits; // first shop that answers wins
     }

@@ -110,3 +110,16 @@ test("a redirect loop gives up instead of hanging", async () => {
   const fetchImpl = async () => hop(302, "https://loop.test/again");
   await assert.rejects(() => safeFetch("https://loop.test/a", {}, { fetchImpl }), /too many redirects/);
 });
+
+// Shopify's PREDICTIVE-search endpoint is the one our own describe-an-item
+// search calls, and it stamps a per-search session id on every result. Left in,
+// each search would mint a fresh product row for a page we may already track —
+// and pay to fetch it separately, forever.
+test("Shopify predictive-search ids don't split one product into many rows", () => {
+  const a = normalizeUrl("https://www.everlane.com/products/mens-cashmere-crew-denim-blue?_pos=3&_psq=the+cashmere+crew&_psid=b90b869a9&_ss=e");
+  const b = normalizeUrl("https://www.everlane.com/products/mens-cashmere-crew-denim-blue?_psid=deadbeef&_psq=cashmere");
+  assert.equal(a, b);
+  assert.equal(a, "https://www.everlane.com/products/mens-cashmere-crew-denim-blue");
+  // ...and a real variant param still survives — it names the size we watch.
+  assert.match(normalizeUrl("https://x.myshopify.com/products/y?variant=42&_psid=z"), /variant=42/);
+});
