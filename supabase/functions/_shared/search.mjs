@@ -25,6 +25,7 @@ import { normalizeUrl, assertSafeUrl } from "./urlguard.mjs";
 import { isBuyable } from "./stock.mjs";
 import { aiSearch } from "./ai.mjs";
 import { searchableStores } from "./stores.mjs";
+import { localeFromUrl } from "./locale.mjs";
 
 /** Present at most this many. More is a menu, not an answer. */
 export const MAX_CANDIDATES = 3;
@@ -147,6 +148,44 @@ export function guessesWithRemainder(query) {
 }
 
 /**
+ * The same product page on the shopper's own country site.
+ *
+ * Retailers split into two kinds, and the split is the whole problem. END,
+ * Farfetch, SSENSE ship worldwide from ONE site — their URL is already right.
+ * Castlery, Uniqlo, IKEA, Zara run a SEPARATE site per country, where the US page
+ * is a different price, different stock, and often not shippable to you at all.
+ * A search that answers with the US page has technically found the product and
+ * practically found nothing.
+ *
+ * So: when a URL names a country and it isn't yours, propose the same path under
+ * yours as an EXTRA candidate. This is a guess — and it's allowed to be, because
+ * it goes through exactly the same verification as everything else. If the SG page
+ * doesn't exist, it fails to read and is dropped; the US one is still there.
+ * Nobody is shown a page we didn't fetch.
+ *
+ * @returns {{url:string, hint:string}[]} zero or one twin
+ */
+export function localeTwins(url, country) {
+  if (!country) return [];
+  const want = String(country).toLowerCase();
+  const found = localeFromUrl(url).country?.toLowerCase();
+  if (!found || found === want) return [];
+
+  let u;
+  try { u = new URL(url); } catch { return []; }
+
+  // Only the shapes localeFromUrl actually recognises, rewritten in place:
+  // /us/... → /sg/... and /us/en/... → /sg/en/...
+  const swapped = u.pathname.replace(
+    new RegExp(`^/${found}(?=/|$)`, "i"),
+    `/${want}`,
+  );
+  if (swapped === u.pathname) return [];
+  u.pathname = swapped;
+  return [{ url: u.toString(), hint: "" }];
+}
+
+/**
  * Read every candidate through the REAL adapter and keep the ones that are
  * genuinely readable. This is the step that makes the feature safe: a URL that
  * doesn't resolve, isn't a product, or can't be parsed never reaches the user.
@@ -158,7 +197,15 @@ export async function verifyCandidates(candidates, ctx = {}, acc = null) {
   // read — findProduct uses it to check the free source's hits BEFORE deciding
   // whether the paid one is worth running.
   const { seen, out } = acc ?? { seen: new Set(), out: [] };
-  for (const c of candidates) {
+
+  // Try the shopper's own country site FIRST for anything that names a different
+  // one. Ordering matters: verification stops once it has enough, so the twin has
+  // to be offered before the page it's replacing, not after.
+  const withTwins = ctx.country
+    ? candidates.flatMap((c) => [...localeTwins(c.url, ctx.country).map((t) => ({ ...t, hint: c.hint })), c])
+    : candidates;
+
+  for (const c of withTwins) {
     if (out.length >= (ctx.max ?? MAX_CANDIDATES) * 2) break; // verify a few spare
     let url;
     try { url = normalizeUrl(c.url); } catch { continue; }
@@ -177,7 +224,13 @@ export async function verifyCandidates(candidates, ctx = {}, acc = null) {
     const reading = await read({ url, label: c.hint ?? "" }, ctx).catch(() => null);
     if (!reading?.ok) continue;
 
-    out.push({ url, adapter: det.adapter, reading, hint: c.hint ?? "" });
+    out.push({
+      url, adapter: det.adapter, reading, hint: c.hint ?? "",
+      // What country's site this is, when the URL says. Drives both ranking and
+      // the warning on the result line — a price we can't act on should never
+      // look like a price we can.
+      country: localeFromUrl(url).country,
+    });
   }
   return out;
 }
@@ -190,8 +243,15 @@ export async function verifyCandidates(candidates, ctx = {}, acc = null) {
  * caught out three times by a store's own currency claims. Availability is
  * unambiguous and needs no conversion, so it decides — and the user sees every
  * price in its native currency and picks.
+ *
+ * The ONE thing that outranks availability is whether the page is even for the
+ * shopper's country: an in-stock bed on castlery.com/us is worth less to someone
+ * in Singapore than an out-of-stock one on castlery.com/sg, because only one of
+ * them is a thing they can buy. A page that names no country isn't penalised —
+ * that's every international retailer, and their single site is the right one.
  */
-export function rankCandidates(verified, { size } = {}) {
+export function rankCandidates(verified, { size, country } = {}) {
+  const want = country ? String(country).toUpperCase() : null;
   const score = (v) => {
     const r = v.reading;
     const variants = r.variants ?? [];
@@ -199,6 +259,7 @@ export function rankCandidates(verified, { size } = {}) {
       ? variants.find((x) => String(x.label).toLowerCase() === String(size).toLowerCase())
       : null;
     return [
+      want && v.country && v.country !== want ? 0 : 1,           // buyable where you are
       wanted ? (wanted.available ? 2 : 0) : (r.available ? 1 : 0), // your size, else anything
       variants.some((x) => isBuyable(x.state)) ? 1 : 0,
       -(variants.length ? 0 : 1), // a reading with real per-size data beats one without

@@ -144,3 +144,55 @@ test("a paused server-tool turn is resumed, not abandoned mid-search", async () 
   assert.equal(bodies[1].messages.at(-1).role, "assistant", "resume by echoing the turn back");
   assert.ok(res.candidates.some((c) => c.url.includes("mrporter.com")));
 });
+
+// ── locale steering ─────────────────────────────────────────────────────────
+test("the prompt tells the model where the shopper is, and why it matters", () => {
+  const withCountry = buildPrompt("Castlery Joseph bed", [], "SG");
+  assert.match(withCountry, /shopper is in SG/);
+  assert.match(withCountry, /SEPARATE site per country/);
+  assert.match(withCountry, /ship worldwide from a single/i, "international retailers must NOT be rewritten");
+  // Not knowing where they are is a valid state, not a blank to fill in.
+  assert.doesNotMatch(buildPrompt("Castlery Joseph bed", []), /shopper is in/);
+});
+
+test("the country reaches the search TOOL, not just the prose", async () => {
+  const seen = [];
+  const fetchImpl = async (_u, init) => {
+    seen.push(JSON.parse(init.body));
+    return { ok: true, status: 200, text: async () => JSON.stringify(ANTHROPIC) };
+  };
+  await aiSearch("joseph bed", { provider: "anthropic", apiKey: "sk-ant-x", country: "SG", fetchImpl });
+  assert.deepEqual(seen[0].tools[0].user_location, { type: "approximate", country: "SG" },
+    "biasing the actual search beats asking the model nicely");
+});
+
+// These tuning knobs are version-sensitive and can't be tested against a live
+// key here. A rejected parameter must cost us the speed-up, never the feature.
+test("if the service rejects a tuning parameter, ask again plainly", async () => {
+  const bodies = [];
+  const fetchImpl = async (_u, init) => {
+    bodies.push(JSON.parse(init.body));
+    return bodies.length === 1
+      ? { ok: false, status: 400, text: async () => '{"error":{"message":"Unknown parameter: reasoning.effort"}}' }
+      : { ok: true, status: 200, text: async () => JSON.stringify(OPENAI) };
+  };
+  const res = await aiSearch("joseph bed", { provider: "openai", apiKey: "sk-x", country: "SG", fetchImpl });
+  assert.equal(res.ok, true, "the retry rescued the search");
+  assert.ok(bodies[0].reasoning, "first attempt is the tuned one");
+  assert.ok(!bodies[1].reasoning, "second drops the knobs rather than the feature");
+});
+
+test("a rejected KEY is not retried — only a rejected parameter is", async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls++; return { ok: false, status: 401, text: async () => "{}" }; };
+  const res = await aiSearch("x", { provider: "openai", apiKey: "sk-x", fetchImpl });
+  assert.equal(calls, 1, "retrying a bad key just spends another request to fail again");
+  assert.match(res.reason, /key was rejected/);
+});
+
+test("a timeout says it's worth retrying, because it is", async () => {
+  const fetchImpl = async () => { const e = new Error("aborted"); e.name = "AbortError"; throw e; };
+  const res = await aiSearch("x", { provider: "openai", apiKey: "sk-x", fetchImpl });
+  assert.match(res.reason, /past its time limit/);
+  assert.match(res.reason, /worth retrying/);
+});

@@ -11,6 +11,7 @@ import { planAdd, MAX_DEFENDED, MAX_ITEMS, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, F
 import { detectAdapter } from "../_shared/router.mjs";
 import { sendMessage, deleteMessage, editMessage, answerCallback } from "../_shared/telegram.mjs";
 import { labelFromUrl } from "../_shared/label.mjs";
+import { localeFromUrl } from "../_shared/locale.mjs";
 import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
 import { cleanUrl } from "../_shared/urlguard.mjs";
 import { expandUrl, isShortLink } from "../_shared/expand.mjs";
@@ -521,16 +522,45 @@ async function findItems(user, chatId, query) {
   return inBackground(runSearch(user, chatId, query));
 }
 
+/**
+ * Which country's shops is this person actually shopping in?
+ *
+ * Derived from what they already track rather than asked for. A brand that runs
+ * one site per country (Castlery, Uniqlo, IKEA) puts it right in the URL, so the
+ * links someone has already chosen are the best evidence we have — and it costs
+ * them no setup question. Falls back to a deployment default, then to nothing,
+ * and "nothing" simply means no locale steer, which is how it behaved before.
+ */
+async function shopperCountry(user) {
+  if (user.settings?.country) return String(user.settings.country).toUpperCase();
+
+  const { data: rows } = await db
+    .from("subscriptions")
+    .select("tracked_products(url)")
+    .eq("user_id", user.id)
+    .limit(25);
+
+  const tally = new Map();
+  for (const r of rows ?? []) {
+    const c = localeFromUrl(r.tracked_products?.url ?? "").country;
+    if (c) tally.set(c, (tally.get(c) ?? 0) + 1);
+  }
+  const top = [...tally.entries()].sort((a, b) => b[1] - a[1])[0];
+  return top?.[0] ?? ((Deno.env.get("PRICEWISE_COUNTRY") || "").toUpperCase() || undefined);
+}
+
 async function runSearch(user, chatId, query) {
-  const [{ data: aiRows }, { data: keyRow }] = await Promise.all([
+  const [{ data: aiRows }, { data: keyRow }, country] = await Promise.all([
     db.rpc("get_user_ai_key", { p_user_id: user.id }),
     db.from("user_api_keys").select("user_id").eq("user_id", user.id).maybeSingle(),
+    shopperCountry(user),
   ]);
   const ai = Array.isArray(aiRows) ? aiRows[0] : aiRows;
 
   const found = await findProduct(query, {
     ai: ai?.api_key ? { apiKey: ai.api_key, provider: ai.provider } : undefined,
     userHasUnblockerKey: Boolean(keyRow),
+    country,
     max: MAX_CANDIDATES,
   });
 
@@ -560,11 +590,16 @@ async function runSearch(user, chatId, query) {
   const settings = { ...(user.settings ?? {}), pending: { action: "find", query, candidates } };
   await db.from("users").update({ settings }).eq("id", user.id);
 
+  // A page for the wrong country must never look like one you can act on: the
+  // price is real, and irrelevant. Say so on the line rather than in a footnote.
+  const foreign = found.some((c) => c.country && country && c.country !== country);
+
   const lines = found.map((c, i) => {
     const r = c.reading;
     const bits = [];
     if (r?.price != null) bits.push(fmt(Number(r.price), r.currency));
     bits.push(r?.available ? "in stock" : "sold out");
+    if (c.country && country && c.country !== country) bits.push(`⚠️ ${c.country} site`);
     return `${i + 1}. ${candidates[i].title}\n   ${bits.join(" · ")}\n   ${c.url}`;
   });
 
@@ -575,6 +610,10 @@ async function runSearch(user, chatId, query) {
     "",
     "Every price and stock line above I read off the page just now — nothing here is",
     "a guess. Tap one to start tracking it.",
+    ...(foreign
+      ? ["", `⚠️ Marked pages are a different country's site${country ? ` (you shop ${country})` : ""} — I couldn't find`,
+         "a local one for that item, so the price and stock may not apply to you."]
+      : []),
   ].join("\n"), { keyboard: candidateKeyboard(found.length) });
 }
 

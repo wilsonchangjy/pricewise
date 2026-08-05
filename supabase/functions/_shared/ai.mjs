@@ -66,9 +66,17 @@ export const aiModelFor = (provider) =>
     ? (env("AI_MODEL_ANTHROPIC") || "claude-opus-5")
     : (env("AI_MODEL_OPENAI") || "gpt-5");
 
-/** A model turn with web search takes tens of seconds; a stuck one must not eat
- *  the whole webhook budget and make Telegram retry the update. */
-const TIMEOUT_MS = 45_000;
+/**
+ * How long a model turn may take.
+ *
+ * Was 45s, and that was measured wrong: it was picked against Telegram's ~60s
+ * retry window, but the webhook acks BEFORE the search runs, so Telegram was
+ * never the constraint. Live, 3 of 4 OpenAI searches came back "the search took
+ * too long" — a reasoning model doing several rounds of web search legitimately
+ * needs longer than 45s. The real ceiling is the Edge Function's own wall clock,
+ * which is far above this.
+ */
+const TIMEOUT_MS = 90_000;
 const MAX_CONTINUATIONS = 2; // server-tool loops pause; resume, but not forever
 
 const URL_RE = /https?:\/\/[^\s"'<>)\]}\\]+/gi;
@@ -88,16 +96,16 @@ const NOT_A_SHOP =
  * @param {{host:string,name:string}[]} [opts.stores]  shops we can actually read
  * @returns {Promise<{ok:boolean, candidates?:{url:string,hint:string}[], reason?:string}>}
  */
-export async function aiSearch(query, { provider, apiKey, stores = [], fetchImpl = fetch, model } = {}) {
+export async function aiSearch(query, { provider, apiKey, stores = [], fetchImpl = fetch, model, country } = {}) {
   const q = String(query ?? "").trim();
   if (!q) return { ok: false, reason: "nothing to search for" };
   if (!apiKey) return { ok: false, reason: "no key" };
   if (!AI_PROVIDERS[provider]) return { ok: false, reason: `unknown provider ${provider}` };
 
-  const prompt = buildPrompt(q, stores);
+  const prompt = buildPrompt(q, stores, country);
   const call = provider === "anthropic" ? askAnthropic : askOpenAI;
 
-  const res = await call({ prompt, apiKey, model: model ?? aiModelFor(provider), fetchImpl });
+  const res = await call({ prompt, apiKey, model: model ?? aiModelFor(provider), fetchImpl, country });
   if (!res.ok) return res;
 
   const candidates = harvestUrls(res.payloads).map((url) => ({ url, hint: "" }));
@@ -109,15 +117,28 @@ export async function aiSearch(query, { provider, apiKey, stores = [], fetchImpl
  * PRODUCT PAGES rather than an essay. It cannot make the answer true — that's
  * what verification is for — so it optimises for a usable list, not confidence.
  */
-export function buildPrompt(query, stores = []) {
+export function buildPrompt(query, stores = [], country) {
   const preferred = stores.map((s) => s.host).filter(Boolean).slice(0, 40);
   return [
-    `Find where to buy this fashion item online: "${query}"`,
+    `Find where to buy this item online: "${query}"`,
     "",
     "Search the web, then reply with the direct product-page URLs — the page for that",
     "specific item on a retailer's own site, not a category page, a search-results page,",
     "a marketplace listing page, or a magazine article.",
     "",
+    // Without this, a US page is as good an answer as any — and for a brand that
+    // runs one site per country (Castlery, Uniqlo, IKEA) the US page is the wrong
+    // product entirely: different price, different stock, often not shippable.
+    country
+      ? [
+          `The shopper is in ${country}. Many brands run a SEPARATE site per country`,
+          `(castlery.com/sg vs castlery.com/us, uniqlo.com/sg vs uniqlo.com/us). Where a`,
+          `brand does, give the ${country} one — its price and stock are the only ones that`,
+          `apply to this shopper. International retailers that ship worldwide from a single`,
+          `site are fine as they are.`,
+        ].join("\n")
+      : "",
+    country ? "" : null,
     preferred.length
       ? `Prefer these retailers where they stock it, in this order of usefulness:\n${preferred.join(", ")}\nAny Shopify or WooCommerce store is also fine — most independent brands run on one of them.`
       : "Prefer the brand's own store or a major retailer.",
@@ -127,12 +148,12 @@ export function buildPrompt(query, stores = []) {
     "- One line per URL, nothing else on the line.",
     "- Only URLs you actually saw in search results. Do not construct or guess a URL.",
     "- If you cannot find the item, reply with the single word NONE.",
-  ].filter(Boolean).join("\n");
+  ].filter((l) => l !== null && l !== "").join("\n");
 }
 
 // ── providers ────────────────────────────────────────────────────────────────
 
-async function askAnthropic({ prompt, apiKey, model, fetchImpl }) {
+async function askAnthropic({ prompt, apiKey, model, fetchImpl, country }) {
   const body = {
     model,
     max_tokens: 4096,
@@ -141,7 +162,12 @@ async function askAnthropic({ prompt, apiKey, model, fetchImpl }) {
     // documentation for the next person as much as configuration.
     thinking: { type: "adaptive" },
     output_config: { effort: "low" }, // "list the URLs you found" is not deep work
-    tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 4 }],
+    tools: [{
+      type: "web_search_20260209", name: "web_search", max_uses: 4,
+      // Bias the SEARCH toward the user's country, not just the wording of the
+      // prompt — a shop with a per-country site should surface its local one.
+      ...(country && { user_location: { type: "approximate", country } }),
+    }],
     messages: [{ role: "user", content: prompt }],
   };
 
@@ -165,12 +191,33 @@ async function askAnthropic({ prompt, apiKey, model, fetchImpl }) {
   return { ok: true, payloads };
 }
 
-async function askOpenAI({ prompt, apiKey, model, fetchImpl }) {
-  const r = await post("https://api.openai.com/v1/responses", {
+async function askOpenAI({ prompt, apiKey, model, fetchImpl, country }) {
+  const headers = { authorization: `Bearer ${apiKey}` };
+  const url = "https://api.openai.com/v1/responses";
+
+  // The untuned version of this took over 45 seconds on three live queries out of
+  // four. Two knobs matter: a reasoning model defaults to thinking hard, and this
+  // task is "list the URLs you already found" — and a wide search context buys
+  // depth we then throw away, because we re-read every page ourselves anyway.
+  const tuned = {
     model,
-    tools: [{ type: "web_search" }],
     input: prompt,
-  }, { authorization: `Bearer ${apiKey}` }, fetchImpl);
+    reasoning: { effort: "low" },
+    tools: [{
+      type: "web_search",
+      search_context_size: "low",
+      ...(country && { user_location: { type: "approximate", country } }),
+    }],
+  };
+
+  let r = await post(url, tuned, headers, fetchImpl);
+
+  // These knobs are version-sensitive, and a rejected parameter would take the
+  // whole feature down rather than just the speed-up. If the service says it
+  // doesn't recognise something, ask again plainly rather than fail.
+  if (!r.ok && r.status === 400 && /unknown|unsupported|unrecognized|not supported|additional propert/i.test(r.body ?? "")) {
+    r = await post(url, { model, input: prompt, tools: [{ type: "web_search" }] }, headers, fetchImpl);
+  }
   return r.ok ? { ok: true, payloads: [r.json] } : r;
 }
 
@@ -185,12 +232,20 @@ async function post(url, body, headers, fetchImpl) {
       signal: ctrl.signal,
     });
     const text = await r.text();
-    if (!r.ok) return { ok: false, reason: apiReason(r.status, text) };
+    // status/body ride along so a caller can tell "you sent a bad parameter"
+    // apart from "your key is wrong" and retry the one that's worth retrying.
+    if (!r.ok) return { ok: false, status: r.status, body: text, reason: apiReason(r.status, text) };
     try { return { ok: true, json: JSON.parse(text) }; }
     catch { return { ok: false, reason: "the model service sent something I couldn't read" }; }
   } catch (e) {
     const aborted = /abort/i.test(String(e?.name ?? e));
-    return { ok: false, reason: aborted ? "the search took too long" : "I couldn't reach the model service" };
+    return {
+      ok: false,
+      status: 0,
+      reason: aborted
+        ? "the search ran past its time limit — that one's usually worth retrying"
+        : "I couldn't reach the model service",
+    };
   } finally {
     clearTimeout(t);
   }

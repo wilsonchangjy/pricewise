@@ -154,3 +154,50 @@ test("a model's suggestions are verified like anyone else's — no shortcut", as
   const out = await offline({}, (f) => findProduct("our legacy camion boots", { sources: [paid], fetchImpl: f }));
   assert.equal(out.length, 0, "unreadable is unreportable, whoever suggested it");
 });
+
+// ── the wrong country's site ────────────────────────────────────────────────
+// Retailers split two ways and the split is the whole problem. END/Farfetch ship
+// worldwide from ONE site, so their URL is already right. Castlery/Uniqlo/IKEA run
+// a SEPARATE site per country, where the US page is a different price, different
+// stock, often not shippable — technically the product, practically nothing.
+// Live case: "Castlery Joseph bed" returned castlery.com/us at USD 1169 to a
+// shopper in Singapore.
+
+test("a foreign country's page proposes the shopper's own as an extra candidate", async () => {
+  const { localeTwins } = await import("../supabase/functions/_shared/search.mjs");
+  assert.deepEqual(
+    localeTwins("https://www.castlery.com/us/products/joseph-bed?bed_frame_size=queen", "SG"),
+    [{ url: "https://www.castlery.com/sg/products/joseph-bed?bed_frame_size=queen", hint: "" }],
+    "same path, your country — a guess, but one that must still survive verification",
+  );
+});
+
+test("a single-site international retailer is left alone", async () => {
+  const { localeTwins } = await import("../supabase/functions/_shared/search.mjs");
+  // No country in the URL: Farfetch/SSENSE-shaped. Nothing to swap, nothing wrong.
+  assert.deepEqual(localeTwins("https://www.ssense.com/en-sg/men/product/x/1234", "SG"), []);
+  // Already yours.
+  assert.deepEqual(localeTwins("https://www.castlery.com/sg/products/joseph-bed", "SG"), []);
+  // We don't know where they are, so we don't get an opinion.
+  assert.deepEqual(localeTwins("https://www.castlery.com/us/products/joseph-bed", undefined), []);
+});
+
+test("buyable-where-you-are outranks in-stock-somewhere-else", async () => {
+  const { rankCandidates } = await import("../supabase/functions/_shared/search.mjs");
+  const mk = (url, country, available) => ({
+    url, country, reading: { ok: true, price: 1, currency: "X", available, variants: [] },
+  });
+  const ranked = rankCandidates(
+    [mk("https://x.test/us/p", "US", true), mk("https://x.test/sg/p", "SG", false)],
+    { country: "SG" },
+  );
+  assert.equal(ranked[0].url, "https://x.test/sg/p",
+    "an out-of-stock bed you could actually buy beats an in-stock one you can't");
+
+  // A page with no country is every international retailer — never penalised.
+  const neutral = rankCandidates(
+    [mk("https://x.test/us/p", "US", true), mk("https://ssense.test/p", undefined, true)],
+    { country: "SG" },
+  );
+  assert.equal(neutral[0].url, "https://ssense.test/p");
+});
