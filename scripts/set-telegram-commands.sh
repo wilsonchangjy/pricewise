@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Register the bot's slash-command menu with Telegram (the "/" autocomplete and
-# the ☰ menu button).
+# Register everything about the bot that lives on TELEGRAM'S servers rather than
+# in this repo: the slash-command menu ("/" autocomplete + the ☰ button), and the
+# profile text people read before they ever send a message.
 #
-# WHY THIS EXISTS: this list lives on Telegram's servers, set via setMyCommands —
-# NOT in the Edge Function code. So trimming the in-chat /help text or removing a
-# command from the router does NOT change what Telegram suggests. The two drifted
-# once (the menu still showed /pause and /resume long after they were retired).
-# This script is the single source of truth; re-run it whenever the set changes.
+# WHY THIS EXISTS: none of this is in the Edge Function code, so trimming /help or
+# removing a command from the router does NOT change what Telegram shows. It has
+# drifted twice now — the menu still listed /pause and /resume months after they
+# were retired, and the description still said "paste a product link to start"
+# after the bot had learned to find items from a description. Both were invisible
+# from the repo. This script is the single source of truth; re-run it whenever the
+# commands or the pitch change.
 #
 # The MENU is intentionally minimal — the tap-first item card (open via /list)
 # carries the per-item actions. Commands NOT listed here (/size, /every,
@@ -49,8 +52,28 @@ curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setChatMenuButton" \
   -H "Content-Type: application/json" -d '{"menu_button":{"type":"commands"}}'
 echo
 
-# Show what's now live so a run is self-verifying.
-echo "Now registered:"
+# The profile text. `description` is the empty-chat screen someone sees BEFORE
+# they send anything — the only pitch a new user gets — and `short_description`
+# is the one-liner on the bot's profile card and in search results. Both cap at
+# 512 chars; keep them to what the bot actually does today.
+echo "Setting the description (shown on the empty-chat screen)…"
+curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyDescription" \
+  -H "Content-Type: application/json" -d @- <<'JSON'
+{"description": "I watch the clothes you're eyeing and message you when your size comes back in stock or the price drops.\n\nPaste a product link to start — or just describe what you're after (\"Our Legacy Camion boots in black\") and I'll go and find it."}
+JSON
+echo
+
+echo "Setting the short description (profile card and search results)…"
+curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyShortDescription" \
+  -H "Content-Type: application/json" -d @- <<'JSON'
+{"short_description": "Open-source price and per-size stock tracker. Paste a link, or describe the item."}
+JSON
+echo
+
+# Read it all back, so a run is self-verifying rather than hopeful.
+echo "Now live:"
 curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMyCommands" \
   -H "Content-Type: application/json" -d '{"scope":{"type":"all_private_chats"}}'
 echo
+curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMyDescription"; echo
+curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMyShortDescription"; echo

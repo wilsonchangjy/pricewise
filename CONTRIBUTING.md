@@ -97,6 +97,35 @@ you'll spend on an adapter.
   country domains can't be fetched through an unblocker at all, so we read
   `ebay.com` and tell the user their prices come back in USD.
 
+## 3. (Optional) Teach a shop to be *searched*, not just read
+
+Separate job, same shape of homework. Reading a shop answers *"what does this page
+say?"*; searching one answers *"do you sell this?"* — which is what powers describing
+an item instead of pasting a link.
+
+Right now the free search speaks exactly two dialects, in
+`_shared/search.mjs` → `searchStore()`:
+
+- **Shopify** — `/search/suggest.json?q=…` (fuzzy; their ranking does the matching)
+- **WooCommerce** — `/wp-json/wc/store/v1/products?search=…` (strict: `"scarlett
+  dress"` finds nothing where `"scarlett"` finds *Scarlett White Dress*, which is why
+  we fall back to the most distinctive single word)
+
+That covers a large slice of the independent long tail and nothing else. **Shops with
+their own adapter but no search route — Uniqlo, COS, Mango, Zara — return nothing to a
+free search: we can read their pages but can't ask them a question.**
+
+If you want to close one of those, the deliverable is small:
+
+1. The **search request URL** for that shop (open its site search and copy the
+   request its own page makes — usually visible in the Network tab as JSON).
+2. The **response body** for a query you know matches something.
+3. Which field holds the **product URL**, and which holds a **title**.
+
+That's it — a source only ever has to produce `{url, hint}[]`. It never reports a
+price or stock: every candidate is handed to the real adapter and read before a user
+sees a number, so a wrong guess costs a dropped result, not a wrong answer.
+
 ## Before opening a PR
 
 - `node --test test/` passes.
