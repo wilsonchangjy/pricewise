@@ -24,7 +24,7 @@ import { selectAdapter } from "./adapters/index.mjs";
 import { normalizeUrl, assertSafeUrl } from "./urlguard.mjs";
 import { isBuyable } from "./stock.mjs";
 import { aiSearch } from "./ai.mjs";
-import { searchableStores } from "./stores.mjs";
+import { searchableStores, isFree } from "./stores.mjs";
 import { localeFromUrl } from "./locale.mjs";
 
 /** Present at most this many. More is a menu, not an answer. */
@@ -35,6 +35,17 @@ export const MAX_CANDIDATES = 3;
  *  between the user and the paid one — it has to fail FAST, not thoroughly. */
 const SHOP_TIMEOUT_MS = 5_000;
 const GUESS_BUDGET_MS = 12_000;
+
+/**
+ * How many BOT-PROTECTED pages one search may read.
+ *
+ * Free stores are unlimited — they cost nothing and answer in a second. Defended
+ * ones spend the user's own unblocker credits (1–10 each), and a search that
+ * quietly burned thirty credits looking for something it didn't find would be a
+ * nasty surprise. Three is enough to compare the retailers that matter for a
+ * given item without the search becoming the expensive part of using the bot.
+ */
+const MAX_DEFENDED_READS = 3;
 
 /** Shops whose search we can query for free, by platform. */
 const SHOPIFY_SUGGEST = (origin, q) =>
@@ -199,40 +210,58 @@ export async function verifyCandidates(candidates, ctx = {}, acc = null) {
   // whether the paid one is worth running.
   const { seen, out } = acc ?? { seen: new Set(), out: [] };
 
-  // Try the shopper's own country site FIRST for anything that names a different
-  // one. Ordering matters: verification stops once it has enough, so the twin has
-  // to be offered before the page it's replacing, not after.
+  // Try the shopper's own country site as well as anything naming a different
+  // one. The twin goes first so that if we ever cap the list, the local page is
+  // the one that survives.
   const withTwins = ctx.country
     ? candidates.flatMap((c) => [...localeTwins(c.url, ctx.country).map((t) => ({ ...t, hint: c.hint })), c])
     : candidates;
 
+  // ── 1. cheap, synchronous filtering ──────────────────────────────────────
+  const prepared = [];
   for (const c of withTwins) {
-    if (out.length >= (ctx.max ?? MAX_CANDIDATES) * 2) break; // verify a few spare
     let url;
     try { url = normalizeUrl(c.url); } catch { continue; }
     if (seen.has(url)) continue;
     seen.add(url);
-
     // A candidate URL is untrusted input like any other — same SSRF guard as /add.
-    const guard = assertSafeUrl(url);
-    if (!guard.ok) continue;
+    if (!assertSafeUrl(url).ok) continue;
+    prepared.push({ url, hint: c.hint ?? "" });
+  }
+  if (!prepared.length) return out;
 
-    const det = await detectAdapter(url, ctx).catch(() => ({ adapter: null }));
-    if (!det?.adapter) continue;
+  // ── 2. which adapter reads each, in parallel ─────────────────────────────
+  // Free for a known host (a regex); a probe or two for the long tail.
+  const detected = (await Promise.all(prepared.map(async (p) => {
+    const det = await detectAdapter(p.url, ctx).catch(() => null);
+    return det?.adapter && selectAdapter(det.adapter) ? { ...p, adapter: det.adapter } : null;
+  }))).filter(Boolean);
 
-    const read = selectAdapter(det.adapter);
-    if (!read) continue;
-    const reading = await read({ url, label: c.hint ?? "" }, ctx).catch(() => null);
-    if (!reading?.ok) continue;
+  // ── 3. read them — free ones all, paid ones capped ───────────────────────
+  // Measured 2026-08-05: reading six defended pages one after another took 5–8
+  // MINUTES per search, of which the model was 25s. They're independent reads,
+  // so they go together. The cap is the other half: parallel removes the
+  // latency reason to stop early, but each defended read still spends the
+  // user's credits, so the number of them is bounded explicitly rather than
+  // falling out of whatever order the sources happened to return.
+  const free = detected.filter((d) => isFree(d.adapter));
+  const paid = detected.filter((d) => !isFree(d.adapter))
+    .slice(0, ctx.maxDefendedReads ?? MAX_DEFENDED_READS);
 
-    out.push({
-      url, adapter: det.adapter, reading, hint: c.hint ?? "",
+  const readings = await Promise.all([...free, ...paid].map(async (d) => {
+    const reading = await selectAdapter(d.adapter)({ url: d.url, label: d.hint }, ctx).catch(() => null);
+    if (!reading?.ok) return null;
+    return {
+      url: d.url, adapter: d.adapter, reading, hint: d.hint,
+      free: isFree(d.adapter),
       // What country's site this is, when the URL says. Drives both ranking and
       // the warning on the result line — a price we can't act on should never
       // look like a price we can.
-      country: localeFromUrl(url).country,
-    });
-  }
+      country: localeFromUrl(d.url).country,
+    };
+  }));
+
+  out.push(...readings.filter(Boolean));
   return out;
 }
 
@@ -250,9 +279,25 @@ export async function verifyCandidates(candidates, ctx = {}, acc = null) {
  * in Singapore than an out-of-stock one on castlery.com/sg, because only one of
  * them is a thing they can buy. A page that names no country isn't penalised —
  * that's every international retailer, and their single site is the right one.
+ *
+ * PRICE does decide, but only between candidates that are otherwise equal AND
+ * quoted in the SAME currency. That's the honest half of "show me the cheapest":
+ * SGD 839 vs SGD 650 is a real comparison a shopper can act on; SGD 650 vs GBP
+ * 455 is not — it needs an FX rate, and a view on duties and shipping that we
+ * don't have. So same-currency candidates sort by price, and the rest keep their
+ * order and let the shopper compare the native prices we print for them.
  */
 export function rankCandidates(verified, { size, country } = {}) {
   const want = country ? String(country).toUpperCase() : null;
+
+  // Only currencies that appear more than once are comparable — a lone GBP
+  // result has nothing to be cheaper than.
+  const counts = new Map();
+  for (const v of verified) {
+    const c = v.reading?.currency;
+    if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+
   const score = (v) => {
     const r = v.reading;
     const variants = r.variants ?? [];
@@ -264,6 +309,9 @@ export function rankCandidates(verified, { size, country } = {}) {
       wanted ? (wanted.available ? 2 : 0) : (r.available ? 1 : 0), // your size, else anything
       variants.some((x) => isBuyable(x.state)) ? 1 : 0,
       -(variants.length ? 0 : 1), // a reading with real per-size data beats one without
+      // Cheapest first among like-for-like. Negated because the comparator sorts
+      // descending, and left out entirely when there's nothing to compare with.
+      r.price != null && counts.get(r.currency) > 1 ? -Number(r.price) : 0,
     ];
   };
   return [...verified].sort((a, b) => {

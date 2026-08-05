@@ -61,10 +61,26 @@ export function detectAiProvider(key) {
   return null;
 }
 
+/**
+ * The SMALL model of each family, deliberately — and the reason is architectural
+ * rather than thrift.
+ *
+ * This model never states a fact. It proposes URLs, and every one is read
+ * through a real adapter before a number reaches anyone. A model mistake costs a
+ * dropped candidate, not a wrong price. That safety net is what makes a cheap
+ * model safe here, in a way it would not be if we trusted its output directly.
+ *
+ * Measured on the same four queries, 2026-08-05 (model spend only):
+ *   gpt-5          $0.105   21–27s   missed Uniqlo entirely
+ *   gpt-5.6-terra  $0.143   8–11s    pricier per token AND used more of them
+ *   gpt-5.6-luna   $0.011   5–10s    found Uniqlo, every URL already SG-local
+ * The cheapest was also the fastest with the best coverage, so no accuracy is
+ * being traded away here. Override either with an env var.
+ */
 export const aiModelFor = (provider) =>
   provider === "anthropic"
-    ? (env("AI_MODEL_ANTHROPIC") || "claude-opus-5")
-    : (env("AI_MODEL_OPENAI") || "gpt-5");
+    ? (env("AI_MODEL_ANTHROPIC") || "claude-haiku-4-5")
+    : (env("AI_MODEL_OPENAI") || "gpt-5.6-luna");
 
 /**
  * How long a model turn may take.

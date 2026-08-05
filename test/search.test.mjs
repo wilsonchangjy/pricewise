@@ -248,3 +248,81 @@ test("lang-COUNTRY locales are recognised and swapped, keeping the language", as
   assert.deepEqual(localeTwins("https://www.ssense.com/en-sg/men/product/x/1", "SG"), [],
     "already local — nothing to do");
 });
+
+// ── parallel verification + the credit cap ──────────────────────────────────
+// Measured 2026-08-05: reading defended pages one after another took 5–8 MINUTES
+// per search, of which the model was 25s. They're independent reads.
+test("candidates are read together, not one after another", async () => {
+  const { verifyCandidates } = await import("../supabase/functions/_shared/search.mjs");
+  let inFlight = 0, peak = 0;
+  const slowShopify = JSON.stringify({ title: "X", price: 100, variants: [{ id: 1, title: "M", available: true, price: 100 }] });
+
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    inFlight++; peak = Math.max(peak, inFlight);
+    await new Promise((r) => setTimeout(r, 40));
+    inFlight--;
+    return String(u).includes(".js")
+      ? { ok: true, status: 200, url: String(u), headers: new Headers(), text: async () => slowShopify }
+      : { ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" };
+  };
+  try {
+    const cands = ["a", "b", "c", "d"].map((s) => ({ url: `https://shop.test/products/${s}`, hint: "" }));
+    const out = await verifyCandidates(cands, { fetchImpl: globalThis.fetch });
+    assert.equal(out.length, 4);
+    assert.ok(peak > 1, `reads must overlap — peak concurrency was ${peak}`);
+  } finally { globalThis.fetch = real; }
+});
+
+// Parallel removes the LATENCY reason to stop early, but each defended read
+// still spends the user's credits — so the number of them is bounded explicitly
+// rather than falling out of whatever order the sources happened to return.
+test("free shops are unlimited; bot-protected ones are capped", async () => {
+  const { verifyCandidates } = await import("../supabase/functions/_shared/search.mjs");
+  const reads = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    reads.push(String(u));
+    return { ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" };
+  };
+  try {
+    // Five Zara URLs — all defended, all host-matched so no probe is needed.
+    const cands = [1, 2, 3, 4, 5].map((n) => ({ url: `https://www.zara.com/sg/en/thing-p0${n}.html`, hint: "" }));
+    await verifyCandidates(cands, { maxDefendedReads: 2 });
+    const zaraReads = reads.filter((u) => u.includes("zara.com")).length;
+    assert.ok(zaraReads <= 2, `capped at 2 defended reads, saw ${zaraReads}`);
+  } finally { globalThis.fetch = real; }
+});
+
+// Price decides between LIKE FOR LIKE only. SGD 839 vs SGD 650 is a comparison a
+// shopper can act on; SGD 650 vs GBP 455 needs an FX rate and a view on duties.
+test("cheapest wins within one currency, and currencies are never converted", async () => {
+  const { rankCandidates } = await import("../supabase/functions/_shared/search.mjs");
+  const mk = (url, price, currency) => ({
+    url, country: "SG",
+    reading: { ok: true, price, currency, available: true, variants: [{ label: "M", available: true }] },
+  });
+
+  const ranked = rankCandidates(
+    [mk("https://a.test/x", 839, "SGD"), mk("https://b.test/x", 650, "SGD")],
+    { country: "SG" },
+  );
+  assert.equal(ranked[0].url, "https://b.test/x", "SGD 650 beats SGD 839");
+
+  // A lone GBP result has nothing to be cheaper than, so price must not move it.
+  const mixed = rankCandidates(
+    [mk("https://sgd.test/x", 839, "SGD"), mk("https://gbp.test/x", 455, "GBP")],
+    { country: "SG" },
+  );
+  assert.equal(mixed[0].url, "https://sgd.test/x", "a smaller number in another currency is not a lower price");
+});
+
+test("in stock still outranks cheaper — a bargain you can't buy isn't one", async () => {
+  const { rankCandidates } = await import("../supabase/functions/_shared/search.mjs");
+  const mk = (url, price, available) => ({
+    url, country: "SG",
+    reading: { ok: true, price, currency: "SGD", available, variants: [{ label: "M", available }] },
+  });
+  const ranked = rankCandidates([mk("https://gone.test/x", 100, false), mk("https://here.test/x", 900, true)], { country: "SG" });
+  assert.equal(ranked[0].url, "https://here.test/x");
+});
