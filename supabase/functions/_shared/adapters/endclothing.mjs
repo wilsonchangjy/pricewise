@@ -24,6 +24,7 @@ import { httpGet } from "../fetcher.mjs";
 import { STATE } from "../stock.mjs";
 import { decodeEntities } from "../text.mjs";
 import { localeFromUrl } from "../locale.mjs";
+import { landedElsewhere, landedElsewhereResult } from "../landed.mjs";
 
 /**
  * What currency is this page priced in? Ask the page first — END publishes
@@ -161,5 +162,10 @@ export async function readEnd(item) {
   if (!hasProductState(r.body)) {
     return { ok: false, kind: "soft", message: "end: page returned without its product payload", checkedAt };
   }
+  // END runs a site per country and redirects between them. A redirect that
+  // keeps the product slug is fine (same boot, local price — that's what we
+  // want); one that drops it means we're on a listing or another product.
+  const off = landedElsewhere({ requestedUrl: item.url, html: r.body, finalUrl: r.url });
+  if (off.away) return landedElsewhereResult("end", off.landedOn, checkedAt);
   return parseEnd(r.body, item);
 }

@@ -13,6 +13,7 @@
 // Opening at "render" — as this did originally — overpaid 5x on the cheap three.
 
 import { httpGet } from "./fetcher.mjs";
+import { landedElsewhere } from "./landed.mjs";
 import { PROVIDERS, DEFAULT_PROVIDER, buildRequestUrl } from "./providers.mjs";
 
 // A block is not always a status code. Akamai answers 200 with a tiny
@@ -90,9 +91,17 @@ export async function fetchApiViaUnblocker(url, { apiKey, provider = DEFAULT_PRO
  * @param {{ apiKey?: string, provider?: string, country?: string, validate?: (html:string)=>boolean }} opts
  */
 export async function fetchMaybeUnblocked(item, { apiKey, provider = DEFAULT_PROVIDER, country = "sg", validate, startTier } = {}) {
+  // Every fetch here is checked against the page it CLAIMS to be before the
+  // caller is allowed to parse it. A geo-redirect that lands on a listing page
+  // otherwise sails through `validate` — a listing has products and offers on
+  // it — and gets read as its first tile. See landed.mjs for the live case.
+  const away = (html, finalUrl) => landedElsewhere({ requestedUrl: item.url, html, finalUrl });
+
   const direct = await httpGet(item.url, { headers: { accept: "text/html" } });
   const clean = direct.ok && !/captcha|are you human|access denied/i.test(direct.body);
   if (clean && (!validate || validate(direct.body))) {
+    const off = away(direct.body, direct.url);
+    if (off.away) return { ok: false, via: "direct", status: direct.status, landedOn: off.landedOn, message: `redirected to ${off.landedOn}` };
     return { ok: true, html: direct.body, via: "direct", status: direct.status };
   }
   if (!apiKey) {
@@ -106,6 +115,17 @@ export async function fetchMaybeUnblocked(item, { apiKey, provider = DEFAULT_PRO
     return {
       ok: false, via: `${provider}:${un.mode}`, status: un.status, error: un.error,
       message: `unblocker failed (${un.status || un.error}) at mode=${un.mode}`,
+    };
+  }
+  // The proxy followed the redirect for us and reports nothing about it, so the
+  // page's own canonical is the only evidence available on this path — and this
+  // is the path the defended stores use, where the failure was found.
+  const off = away(un.body);
+  if (off.away) {
+    return {
+      ok: false, via: `${provider}:${un.mode}`, status: un.status, landedOn: off.landedOn,
+      message: `redirected to ${off.landedOn}`,
+      cost: un.cost, remaining: un.remaining,
     };
   }
   return { ok: true, html: un.body, via: `${provider}:${un.mode}`, tier: un.mode, status: un.status, cost: un.cost, remaining: un.remaining };

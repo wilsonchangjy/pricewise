@@ -10,6 +10,7 @@
 // parseJsonLd() is pure (takes HTML string) so it is unit-testable.
 
 import { httpGet } from "../fetcher.mjs";
+import { landedElsewhere, landedElsewhereResult } from "../landed.mjs";
 
 const offerOf = (x) => (Array.isArray(x?.offers) ? x.offers[0] : x?.offers);
 
@@ -222,5 +223,10 @@ export async function readJsonLd(item) {
     const kind = r.status === 403 ? "blocked" : r.error === "timeout" ? "timeout" : "http";
     return { ok: false, kind, status: r.status, message: `page fetch failed (${r.status || r.error})`, checkedAt };
   }
+  // This adapter is the catch-all for shops nobody has hand-written a reader
+  // for, which makes it the one most likely to be pointed at a page that
+  // redirects. Check before parsing, not after.
+  const off = landedElsewhere({ requestedUrl: item.url, html: r.body, finalUrl: r.url });
+  if (off.away) return landedElsewhereResult("page", off.landedOn, checkedAt);
   return parseJsonLd(r.body, item);
 }
