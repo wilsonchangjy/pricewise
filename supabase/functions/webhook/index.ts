@@ -605,6 +605,12 @@ async function runSearch(user, chatId, query, token) {
     userHasUnblockerKey: Boolean(keyRow),
     country,
     max: MAX_CANDIDATES,
+    // Remembering WHERE something was found makes a retry — and a second person
+    // asking the same thing — free. The pages are still read fresh every time.
+    cache: {
+      get: async (key, c) => (await db.rpc("get_cached_search", { p_query: key, p_country: c ?? "" })).data,
+      put: (key, c, urls) => db.rpc("put_cached_search", { p_query: key, p_country: c ?? "", p_urls: urls }),
+    },
   });
 
   // The user edited or re-asked while this was running — answer only the

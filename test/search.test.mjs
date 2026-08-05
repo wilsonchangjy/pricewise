@@ -326,3 +326,72 @@ test("in stock still outranks cheaper — a bargain you can't buy isn't one", as
   const ranked = rankCandidates([mk("https://gone.test/x", 100, false), mk("https://here.test/x", 900, true)], { country: "SG" });
   assert.equal(ranked[0].url, "https://here.test/x");
 });
+
+// ── caching ─────────────────────────────────────────────────────────────────
+// A search costs the user a model call and up to three unblocker reads. The same
+// search happens twice more often than you'd think: a retry after a failure, a
+// corrected typo, or two people wanting the same thing.
+test("word order, case and punctuation are all the same query", async () => {
+  const { cacheKeyFor } = await import("../supabase/functions/_shared/search.mjs");
+  const k = cacheKeyFor("Our Legacy Camion boots in black");
+  assert.equal(cacheKeyFor("camion boots our legacy in BLACK!"), k);
+  assert.equal(cacheKeyFor("  our legacy   camion boots in black  "), k);
+  assert.notEqual(cacheKeyFor("our legacy camion boots in brown"), k);
+});
+
+test("a cache hit skips the FINDING and still reads every page", async () => {
+  const { findProduct } = await import("../supabase/functions/_shared/search.mjs");
+  const page = JSON.stringify({ title: "Cached", price: 100, variants: [{ id: 1, title: "M", available: true, price: 100 }] });
+
+  let sourcesRan = 0;
+  const source = async () => { sourcesRan++; return []; };
+  const reads = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    reads.push(String(u));
+    return String(u).includes(".js")
+      ? { ok: true, status: 200, url: String(u), headers: new Headers(), text: async () => page }
+      : { ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" };
+  };
+  try {
+    const out = await findProduct("anything at all", {
+      sources: [source],
+      cache: { get: async () => ([{ url: "https://shop.test/products/x", hint: "" }]), put: async () => {} },
+    });
+    assert.equal(out.length, 1);
+    assert.equal(out.cached, true);
+    assert.equal(sourcesRan, 0, "no model call, no shop search — that's the saving");
+    assert.ok(reads.some((u) => u.includes("/products/x.js")), "the page is STILL read: a cached price would go stale");
+  } finally { globalThis.fetch = real; }
+});
+
+test("a remembered URL that has since died falls through to a real search", async () => {
+  const { findProduct } = await import("../supabase/functions/_shared/search.mjs");
+  let sourcesRan = 0;
+  const source = async () => { sourcesRan++; return []; };
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => ({ ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" });
+  try {
+    await findProduct("gone now", {
+      sources: [source],
+      cache: { get: async () => ([{ url: "https://shop.test/products/dead", hint: "" }]), put: async () => {} },
+    });
+    assert.equal(sourcesRan, 1, "a stale cache must not become a permanent 'not found'");
+  } finally { globalThis.fetch = real; }
+});
+
+test("an empty result is never cached", async () => {
+  const { findProduct } = await import("../supabase/functions/_shared/search.mjs");
+  let wrote = 0;
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => ({ ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" });
+  try {
+    await findProduct("nothing here", {
+      sources: [async () => ([{ url: "https://shop.test/products/nope", hint: "" }])],
+      cache: { get: async () => null, put: async () => { wrote++; } },
+    });
+    // Caching a miss would turn one bad day at a retailer into a week of
+    // "I couldn't find it" for everyone who asks.
+    assert.equal(wrote, 0);
+  } finally { globalThis.fetch = real; }
+});

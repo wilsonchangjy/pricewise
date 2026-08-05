@@ -364,11 +364,37 @@ export function rankCandidates(verified, { size, country } = {}) {
  * `sources` is injectable so a web/LLM source can be added without touching
  * anything here — and so the tests never hit the network.
  */
+/**
+ * The cache key. Case, punctuation and word order are all noise: someone
+ * retyping after a typo shouldn't pay twice because they capitalised
+ * differently. Sorting the words means "camion boots our legacy" and "our legacy
+ * camion boots" are one query, which they plainly are.
+ */
+export function cacheKeyFor(query) {
+  return String(query).toLowerCase().replace(/[^a-z0-9 ]+/g, " ")
+    .split(/\s+/).filter(Boolean).sort().join(" ");
+}
+
 export async function findProduct(query, ctx = {}) {
   const sources = ctx.sources ?? sourcesFor(ctx);
   const want = ctx.max ?? MAX_CANDIDATES;
   const acc = { seen: new Set(), out: [] };
   const notes = [];
+
+  // A remembered search skips the FINDING, never the reading. Every URL below
+  // still goes through the adapters — see the migration for why storing a price
+  // here would be the one unacceptable shortcut.
+  const cached = ctx.cache ? await ctx.cache.get(cacheKeyFor(query), ctx.country).catch(() => null) : null;
+  if (cached?.length) {
+    await verifyCandidates(cached, ctx, acc);
+    if (acc.out.length) {
+      const hit = dedupeByProduct(rankCandidates(acc.out, ctx)).slice(0, want);
+      hit.notes = [];
+      hit.cached = true;
+      return hit;
+    }
+    // Everything we remembered has since gone. Fall through and search properly.
+  }
 
   // Verify after EACH source, not once at the end. The stopping condition that
   // matters is "do we have enough readable results yet" — not "did a source
@@ -387,6 +413,17 @@ export async function findProduct(query, ctx = {}) {
 
   const ranked = dedupeByProduct(rankCandidates(acc.out, ctx)).slice(0, want);
   ranked.notes = notes;
+
+  // Remember what we FOUND, not what we read — and only when we found something.
+  // Caching an empty result would turn one bad day at a retailer into a week of
+  // "I couldn't find it" for everybody.
+  if (ctx.cache && ranked.length) {
+    await ctx.cache.put(
+      cacheKeyFor(query),
+      ctx.country,
+      ranked.map((c) => ({ url: c.url, hint: c.hint ?? "" })),
+    ).catch(() => { /* a cache that won't write is not a failed search */ });
+  }
   return ranked;
 }
 
