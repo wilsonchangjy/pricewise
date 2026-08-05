@@ -58,3 +58,23 @@ test("END is FREE — no unblocker key, so it must not be in the defended set", 
   const { strategyFor } = await import("../supabase/functions/_shared/router.mjs");
   assert.equal(strategyFor("end"), "direct");
 });
+
+// END runs one site per country and prices each in ITS currency. This used to be
+// hardcoded "SGD" — true of the page it was written against, false everywhere
+// else. The describe-an-item search surfaced the /us/ page and the bot labelled
+// $705 as "SGD 705". Verified live 2026-08-05: /sg/ is S$839, /us/ is $705 USD.
+test("currency follows the page, not the adapter's birthplace", () => {
+  const us = { url: "https://www.endclothing.com/us/our-legacy-camion-boot-cocbb.html" };
+
+  // The page says so outright — believe it.
+  const withMarkup = parseEnd(FIXTURE.replace("</head>", '<script>{"priceCurrency":"USD"}</script></head>'), us);
+  assert.equal(withMarkup.currency, "USD");
+
+  // No currency in the markup: the country in the URL is the next best evidence.
+  assert.equal(parseEnd(FIXTURE, us).currency, "USD");
+  assert.equal(parseEnd(FIXTURE, ITEM).currency, "SGD", "the /sg/ case still reads SGD");
+
+  // An explicit override still wins — that's the caller telling us something
+  // they know and we don't.
+  assert.equal(parseEnd(FIXTURE, { ...us, currency: "GBP" }).currency, "GBP");
+});

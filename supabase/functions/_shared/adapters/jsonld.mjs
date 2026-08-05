@@ -56,16 +56,29 @@ export function parseJsonLd(html, item) {
     ),
   ].map((m) => m[1].trim());
 
-  let node = null;
+  // Collect EVERY product node on the page, not the first one. A page can carry
+  // several: a "you may also like" carousel, or — the case that burned us — a
+  // brand LISTING page reached by a geo-redirect, where the first Product is
+  // simply whatever sits top-left in the grid. Reading that one produced a
+  // confident, wrong answer: "OUR LEGACY Black Mini Jacket, USD 720" for a page
+  // that is Black Camion Boots at USD 760.
+  const nodes = [];
   for (const b of blocks) {
-    try {
-      node = findProductNode(JSON.parse(b));
-    } catch {
-      node = null;
-    }
-    if (node) break;
+    try { collectProductNodes(JSON.parse(b), nodes); } catch { /* not JSON */ }
   }
-  if (!node) return { ok: false, kind: "parse", message: "no JSON-LD Product/ProductGroup found", checkedAt };
+  if (!nodes.length) return { ok: false, kind: "parse", message: "no JSON-LD Product/ProductGroup found", checkedAt };
+
+  const node = chooseProductNode(nodes, item);
+  if (!node) {
+    // Several products and none of them is the one we asked for. That is a
+    // listing page, or a redirect that landed somewhere else. Refusing costs a
+    // check; guessing costs the user's trust in every price we ever print.
+    return {
+      ok: false, kind: "soft",
+      message: `page has ${nodes.length} products and none matches the requested item (listing page or redirect?)`,
+      checkedAt,
+    };
+  }
 
   if (isType(node, "ProductGroup") && Array.isArray(node.hasVariant) && node.hasVariant.length) {
     return fromProductGroup(node, item, checkedAt);
@@ -147,27 +160,58 @@ function isType(node, type) {
   return t === type || (Array.isArray(t) && t.includes(type));
 }
 
-// Return the Product OR ProductGroup node (whichever we hit first). We don't
-// descend into hasVariant, so a ProductGroup is returned whole (not its first
-// child Product).
-function findProductNode(node) {
+// Every Product / ProductGroup on the page. We don't descend into hasVariant, so
+// a ProductGroup is collected whole (not its child Products).
+function collectProductNodes(node, out) {
   if (Array.isArray(node)) {
-    for (const x of node) {
-      const f = findProductNode(x);
-      if (f) return f;
-    }
-    return null;
+    for (const x of node) collectProductNodes(x, out);
+    return out;
   }
   if (node && typeof node === "object") {
-    if (isType(node, "Product") || isType(node, "ProductGroup")) return node;
+    if (isType(node, "Product") || isType(node, "ProductGroup")) { out.push(node); return out; }
     if (Array.isArray(node["@graph"])) {
-      for (const x of node["@graph"]) {
-        const f = findProductNode(x);
-        if (f) return f;
-      }
+      for (const x of node["@graph"]) collectProductNodes(x, out);
     }
   }
-  return null;
+  return out;
+}
+
+/**
+ * Which of these products is the one whose URL we asked for?
+ *
+ * One product on the page is the ordinary case — take it, exactly as before.
+ * More than one and we have to prove identity rather than assume position: match
+ * on the node's own url/@id, or on an id (sku / productID / mpn) that appears in
+ * the URL we requested. SSENSE puts `18122381` in both, which is what makes this
+ * decidable at all.
+ *
+ * Returns null when it can't be decided — the caller refuses. That's the whole
+ * point: an unrecognised page must never be read as if it were recognised.
+ */
+function chooseProductNode(nodes, item) {
+  if (nodes.length === 1) return nodes[0];
+
+  const reqUrl = String(item?.url ?? "");
+  if (!reqUrl) return null;
+
+  let reqPath = reqUrl;
+  try { reqPath = new URL(reqUrl).pathname.replace(/\/+$/, "").toLowerCase(); } catch { /* keep raw */ }
+
+  const sameUrl = (n) => {
+    const raw = n?.url ?? n?.["@id"];
+    if (!raw) return false;
+    try {
+      return new URL(String(raw), reqUrl).pathname.replace(/\/+$/, "").toLowerCase() === reqPath;
+    } catch { return false; }
+  };
+
+  // Ids are only usable as evidence when they're distinctive — a two-character
+  // sku matches half the page by accident.
+  const idIn = (n) => [n?.sku, n?.productID, n?.mpn, n?.gtin13]
+    .filter((v) => v != null && String(v).length >= 4)
+    .some((v) => reqPath.includes(String(v).toLowerCase()));
+
+  return nodes.find(sameUrl) ?? nodes.find(idIn) ?? null;
 }
 
 /** @param {import("../types.mjs").Item} item */

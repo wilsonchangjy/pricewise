@@ -201,3 +201,50 @@ test("buyable-where-you-are outranks in-stock-somewhere-else", async () => {
   );
   assert.equal(neutral[0].url, "https://ssense.test/p");
 });
+
+// Live 2026-08-05: "Our Legacy Camion boots" filled two of three slots with the
+// SAME boot at the SAME shop — endclothing.com/sg and endclothing.com/us — one
+// of them flagged as the wrong country. Three slots is an answer; spending two
+// on one product is a menu with a typo.
+test("the same product on two country sites is ONE result, in your country", async () => {
+  const { dedupeByProduct } = await import("../supabase/functions/_shared/search.mjs");
+  const end = (c, price, cur) => ({
+    url: `https://www.endclothing.com/${c}/our-legacy-camion-boot-cocbb.html`,
+    country: c.toUpperCase(),
+    reading: { ok: true, price, currency: cur, available: true, variants: [] },
+  });
+  // Ranking has already put SG first; dedupe keeps the first of each product.
+  const out = dedupeByProduct([end("sg", 839, "SGD"), end("us", 705, "USD")]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].country, "SG");
+});
+
+test("two genuinely different products at one shop both survive", async () => {
+  const { dedupeByProduct } = await import("../supabase/functions/_shared/search.mjs");
+  const at = (slug) => ({ url: `https://www.endclothing.com/sg/${slug}.html`, country: "SG", reading: { ok: true } });
+  assert.equal(dedupeByProduct([at("our-legacy-camion-boot-cocbb"), at("our-legacy-mini-jacket-xyz")]).length, 2);
+  // ...and so do the same slug at two different retailers.
+  assert.equal(dedupeByProduct([
+    { url: "https://www.endclothing.com/sg/x.html", country: "SG", reading: {} },
+    { url: "https://www.ssense.com/sg/x.html", country: "SG", reading: {} },
+  ]).length, 2);
+});
+
+// SSENSE / MR PORTER / NET-A-PORTER spell the locale "en-us", not "us". That
+// shape wasn't recognised at all, so an SSENSE US link read as "no country" —
+// dodging BOTH the wrong-country warning and the swap to the local site. That's
+// how a /en-us/ page reached a shopper in Singapore looking untroubled.
+test("lang-COUNTRY locales are recognised and swapped, keeping the language", async () => {
+  const { localeTwins } = await import("../supabase/functions/_shared/search.mjs");
+  const { localeFromUrl } = await import("../supabase/functions/_shared/locale.mjs");
+  const us = "https://www.ssense.com/en-us/men/product/our-legacy/black-camion-boots/18122381";
+
+  assert.equal(localeFromUrl(us).country, "US");
+  assert.equal(localeFromUrl(us).currency, "USD");
+  assert.deepEqual(localeTwins(us, "SG"), [{
+    url: "https://www.ssense.com/en-sg/men/product/our-legacy/black-camion-boots/18122381",
+    hint: "",
+  }]);
+  assert.deepEqual(localeTwins("https://www.ssense.com/en-sg/men/product/x/1", "SG"), [],
+    "already local — nothing to do");
+});

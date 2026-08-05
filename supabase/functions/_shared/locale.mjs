@@ -24,6 +24,11 @@ export function localeFromUrl(url) {
   let country;
   let m;
   if ((m = u.match(/[?&](?:countryIso|country|store)=([A-Za-z]{2})\b/i))) country = m[1];
+  // lang-COUNTRY, the shape SSENSE / MR PORTER / NET-A-PORTER use: /en-us/,
+  // /en-sg/. Missed entirely before, so an SSENSE US link read as "no country"
+  // — it dodged both the wrong-country warning and the swap to the local site,
+  // which is how a /en-us/ URL was offered to a shopper in Singapore.
+  else if ((m = u.match(/^(?:https?:\/\/)?[^/]+\/[a-z]{2}-([a-z]{2})(?:[\/?#]|$)/i))) country = m[1];
   else if ((m = u.match(/\/([a-z]{2})\/[a-z]{2}(?:[\/?#]|$)/i))) country = m[1]; // /sg/en/
   else if ((m = u.match(/^(?:https?:\/\/)?[^/]+\/([a-z]{2})(?:[\/?#]|$)/i))) country = m[1]; // /sg/
   country = country ? country.toUpperCase() : undefined;

@@ -174,12 +174,13 @@ export function localeTwins(url, country) {
   let u;
   try { u = new URL(url); } catch { return []; }
 
-  // Only the shapes localeFromUrl actually recognises, rewritten in place:
-  // /us/... → /sg/... and /us/en/... → /sg/en/...
-  const swapped = u.pathname.replace(
-    new RegExp(`^/${found}(?=/|$)`, "i"),
-    `/${want}`,
-  );
+  // The two shapes localeFromUrl recognises, rewritten in place:
+  //   /us/...     → /sg/...     (END, Castlery, Uniqlo)
+  //   /en-us/...  → /en-sg/...  (SSENSE, MR PORTER, NET-A-PORTER — language is
+  //                              kept, only the country changes)
+  const swapped = u.pathname
+    .replace(new RegExp(`^/([a-z]{2})-${found}(?=/|$)`, "i"), `/$1-${want}`)
+    .replace(new RegExp(`^/${found}(?=/|$)`, "i"), `/${want}`);
   if (swapped === u.pathname) return [];
   u.pathname = swapped;
   return [{ url: u.toString(), hint: "" }];
@@ -298,9 +299,40 @@ export async function findProduct(query, ctx = {}) {
     if (acc.out.length >= want) break;
   }
 
-  const ranked = rankCandidates(acc.out, ctx).slice(0, want);
+  const ranked = dedupeByProduct(rankCandidates(acc.out, ctx)).slice(0, want);
   ranked.notes = notes;
   return ranked;
+}
+
+/**
+ * One product per retailer, not one per country site.
+ *
+ * Live: "Our Legacy Camion boots" came back as endclothing.com/sg AND
+ * endclothing.com/us — the same boot, the same shop, offered twice, with one of
+ * them marked as the wrong country. Two of three slots spent on one product.
+ *
+ * The identity is host + path-with-the-country-segment-removed, so /sg/x and
+ * /us/x collapse. Ranking has already put the shopper's own country first, so
+ * keeping the first occurrence keeps the right one.
+ */
+export function dedupeByProduct(ranked) {
+  const seen = new Set();
+  const out = [];
+  for (const c of ranked) {
+    let key = c.url;
+    try {
+      const u = new URL(c.url);
+      const country = (c.country ?? localeFromUrl(c.url).country ?? "").toLowerCase();
+      const path = country
+        ? u.pathname.replace(new RegExp(`^/${country}(?=/|$)`, "i"), "")
+        : u.pathname;
+      key = `${u.hostname.replace(/^www\./, "")}${path.replace(/\/+$/, "")}`.toLowerCase();
+    } catch { /* unparseable: fall back to the whole string */ }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+  }
+  return out;
 }
 
 /**

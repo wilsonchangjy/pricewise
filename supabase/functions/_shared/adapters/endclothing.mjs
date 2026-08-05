@@ -23,6 +23,18 @@
 import { httpGet } from "../fetcher.mjs";
 import { STATE } from "../stock.mjs";
 import { decodeEntities } from "../text.mjs";
+import { localeFromUrl } from "../locale.mjs";
+
+/**
+ * What currency is this page priced in? Ask the page first — END publishes
+ * priceCurrency in its markup ("USD" on /us/, "SGD" on /sg/, verified live) —
+ * and fall back to the country in the URL. Never assume: a wrong currency label
+ * is worse than no price, because it looks like an answer.
+ */
+function currencyOf(html, url) {
+  const m = String(html).match(/"(?:priceCurrency|currencyCode|currency)"\s*:\s*"([A-Z]{3})"/);
+  return m?.[1] ?? localeFromUrl(url).currency;
+}
 
 /** The Next.js payload, which here is a real tag-bounded JSON script. */
 export function nextDataOf(html) {
@@ -125,7 +137,12 @@ export function parseEnd(html, item) {
   return {
     ok: true,
     price,
-    currency: item.currency ?? "SGD",
+    // END runs one site per country and prices each in ITS currency: the /us/
+    // page is USD, /sg/ is SGD. This used to be hardcoded "SGD", which was true
+    // of the page it was written against and false everywhere else — the search
+    // surfaced the /us/ page and we labelled $705 as "SGD 705". The page itself
+    // publishes priceCurrency, so read it; the URL's locale is the fallback.
+    currency: item.currency ?? currencyOf(html, item.url) ?? "SGD",
     available: chosen.some((v) => v.available),
     variants: chosen,
     title,
