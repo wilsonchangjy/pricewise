@@ -118,6 +118,9 @@ Deno.serve(async (req) => {
   return ok();
 });
 
+/** The call to action under a result list — dropped once the user has decided. */
+const TAP_FOOTER = "Every price and stock line above I read off the page just now — nothing here is\na guess. Tap one to start tracking it.";
+
 const TIP = "\n\nTip: open the product page in your browser, choose the colour/size, then copy the link straight from the address bar.";
 const ok = () => new Response("ok", { status: 200 });
 const reply = (chatId, text, opts) => sendMessage(BOT_TOKEN, chatId, text, opts);
@@ -735,8 +738,7 @@ async function runSearch(user, chatId, query, token) {
     "",
     ...lines,
     "",
-    "Every price and stock line above I read off the page just now — nothing here is",
-    "a guess. Tap one to start tracking it.",
+    TAP_FOOTER,
     ...(foreign
       ? ["", `⚠️ Marked pages are a different country's site${country ? ` (you shop ${country})` : ""} — I couldn't find`,
          "a local one for that item, so the price and stock may not apply to you."]
@@ -744,7 +746,7 @@ async function runSearch(user, chatId, query, token) {
     // These three share almost no words, so they're three different products
     // rather than one product at three shops — which only happens when the
     // description named a category instead of an item.
-    ...(looksBroad(found, query)
+    ...(looksBroad(candidates.map((c) => c.title), query)
       ? ["", "These are different products, not the same one at three shops — “" + query + "”",
          "reads as a category. Naming the brand and product gets you the actual item",
          "(\"Sunday Riley C.E.O. vitamin C serum\" rather than \"vitamin c serum\")."]
@@ -768,9 +770,15 @@ async function trackCandidate(user, chatId, messageId, cqId, arg, originalText =
   // Telegram keeps the old keyboard unless explicitly replaced, so an EMPTY
   // keyboard is the removal.
   await editMessage(BOT_TOKEN, chatId, messageId,
-    `${originalText}\n\n✅ Tracking #${i + 1} — ${pick.title}`,
+    `${withoutTapFooter(originalText)}\n\n✅ Tracking #${i + 1} — ${pick.title}`,
     { keyboard: { inline_keyboard: [] } });
   return addItem(user, chatId, pick.url);
+}
+
+/** Strip the "tap one to track" invitation once something has been tapped. */
+function withoutTapFooter(text) {
+  const at = String(text ?? "").indexOf(TAP_FOOTER.split("\n")[0]);
+  return at === -1 ? String(text ?? "") : String(text).slice(0, at).trimEnd();
 }
 
 async function dismissCandidates(user, chatId, messageId, cqId, originalText = "") {
@@ -778,8 +786,10 @@ async function dismissCandidates(user, chatId, messageId, cqId, originalText = "
   await answerCallback(BOT_TOKEN, cqId);
   // Same rule as tracking: the list stays, the buttons go. What was found is
   // worth keeping on screen even when none of it was wanted today.
+  // Keep the list; drop the buttons AND the invitation to tap them, which is
+  // just noise once the decision is made.
   return editMessage(BOT_TOKEN, chatId, messageId,
-    `${originalText}\n\n— Nothing added. The links above still work if you change your mind.`,
+    `${withoutTapFooter(originalText)}\n\n— Nothing added. The links above still work if you change your mind.`,
     { keyboard: { inline_keyboard: [] } });
 }
 

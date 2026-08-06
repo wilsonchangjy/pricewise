@@ -494,28 +494,38 @@ test("a reading with no price is dropped, however readable the page was", async 
 // that share no distinctive word are different products.
 test("three different products read as a broad query", async () => {
   const { looksBroad } = await import("../supabase/functions/_shared/search.mjs");
-  const t = (title) => ({ reading: { title } });
   assert.equal(looksBroad([
-    t("Cetaphil Bright Healthy Radiance Serum"),
-    t("The Ordinary Ascorbyl Glucoside Solution"),
-    t("Beauty of Joseon Light On Serum"),
+    ("Cetaphil Bright Healthy Radiance Serum"),
+    ("The Ordinary Ascorbyl Glucoside Solution"),
+    ("Beauty of Joseon Light On Serum"),
   ], "vitamin c serum"), true,
     "they share only 'serum', which is the word they all matched ON");
 });
 
 test("the same product at three shops does NOT read as broad", async () => {
   const { looksBroad } = await import("../supabase/functions/_shared/search.mjs");
-  const t = (title) => ({ reading: { title } });
   assert.equal(looksBroad([
-    t("Our Legacy Camion Boot"),
-    t("OUR LEGACY Camion Leather Boots"),
-    t("Our Legacy — Camion Boots Black"),
+    ("Our Legacy Camion Boot"),
+    ("OUR LEGACY Camion Leather Boots"),
+    ("Our Legacy — Camion Boots Black"),
   ], "Our Legacy Camion boots in black"), false,
     "the titles are almost entirely the query itself — one product, three retailers");
 });
 
 test("too few results to judge means no opinion", async () => {
   const { looksBroad } = await import("../supabase/functions/_shared/search.mjs");
-  assert.equal(looksBroad([{ reading: { title: "Anything At All" } }], "anything"), false);
+  assert.equal(looksBroad(["Anything At All"], "anything"), false);
   assert.equal(looksBroad([], "x"), false);
+});
+
+// The live miss: beautyofjoseon is Shopify, whose adapter returns NO title, so
+// that candidate contributed an empty set, was filtered out, and left too few to
+// compare — the check gave up on exactly the search it was written for. It must
+// judge the titles the shopper SEES (which fall back to labelFromUrl).
+test("a titleless Shopify result still counts, because the user sees a title", async () => {
+  const { looksBroad } = await import("../supabase/functions/_shared/search.mjs");
+  assert.equal(looksBroad([
+    "Light On Serum Centella Vita C (beautyofjoseon.com)",
+    "The Ordinary Ascorbyl Glucoside Solution 12%",
+  ], "vitamin c serum"), true);
 });

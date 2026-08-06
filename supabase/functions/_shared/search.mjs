@@ -562,17 +562,23 @@ export async function aiSearchSource(query, ctx = {}) {
  *                                 little remains and nothing disagrees -> specific
  *   "vitamin c serum"          -> Cetaphil / Ordinary / Joseon remain, sharing
  *                                 nothing -> broad
+ *
+ * Takes the titles AS DISPLAYED, not the raw readings. The Shopify adapter
+ * returns no title at all, so a Shopify result contributed an empty set, got
+ * filtered out, and left too few to compare — the check quietly gave up on
+ * exactly the searches it was written for. What the shopper sees is what should
+ * be judged.
  */
-export function looksBroad(verified, query = "") {
-  if ((verified?.length ?? 0) < 2) return false;
+export function looksBroad(titles, query = "") {
+  if ((titles?.length ?? 0) < 2) return false;
 
   const tokens = (s) =>
     String(s ?? "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/)
       .filter((w) => w.length >= 5);
 
   const asked = new Set(tokens(query));
-  const sets = verified
-    .map((v) => new Set(tokens(v.reading?.title || v.hint).filter((w) => !asked.has(w))))
+  const sets = titles
+    .map((t) => new Set(tokens(t).filter((w) => !asked.has(w))))
     .filter((s) => s.size);
 
   // Fewer than two titles have anything left to compare: everything they say is

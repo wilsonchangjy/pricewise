@@ -24,6 +24,11 @@ const TRACKING_PARAMS = [
   // Algolia's search-analytics ids, which END and others append when you arrive
   // from site search — same product, different link.
   /^(queryID|objectID|indexName)$/i,
+  // THG (Lookfantastic, Cult Beauty) hangs a Bazaarvoice page-state and a
+  // "how did you get here" context on product links — `rctxt=postAddToBasket`
+  // literally records that you just added it to a basket. Pure session noise,
+  // and two people arriving differently would otherwise be tracked separately.
+  /^(rctxt|bvstate|affil|shippingcountry)$/i,
   // Shopify search context — two people finding the same item different ways
   // would otherwise create two product rows. `variant` is NOT junk: it names a size.
   // `_psid`/`_psq` come off the PREDICTIVE-search endpoint, which is the one our

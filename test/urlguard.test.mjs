@@ -123,3 +123,14 @@ test("Shopify predictive-search ids don't split one product into many rows", () 
   // ...and a real variant param still survives — it names the size we watch.
   assert.match(normalizeUrl("https://x.myshopify.com/products/y?variant=42&_psid=z"), /variant=42/);
 });
+
+// THG (Lookfantastic, Cult Beauty) hangs a Bazaarvoice page-state and a
+// "how did you get here" context on product links — `rctxt=postAddToBasket`
+// literally records that you just added it to a basket. Same row-splitting
+// hazard as Shopify's _psid: one product, many tracked rows, each paid for.
+test("THG context params don't split one product into many rows", () => {
+  const a = normalizeUrl("https://www.lookfantastic.com/p/the-ordinary-niacinamide-10-zinc-1-serum-30ml/13187076/?bvstate=pg%3A50%2Fct%3Ar&rctxt=default");
+  const b = normalizeUrl("https://www.lookfantastic.com/p/the-ordinary-niacinamide-10-zinc-1-serum-30ml/13187076/?rctxt=postAddToBasket");
+  assert.equal(a, b);
+  assert.match(a, /13187076/, "the id that identifies the product must survive");
+});
