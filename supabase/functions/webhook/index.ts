@@ -744,7 +744,7 @@ async function runSearch(user, chatId, query, token) {
   ].join("\n"), { keyboard: candidateKeyboard(found.length) });
 }
 
-async function trackCandidate(user, chatId, messageId, cqId, arg) {
+async function trackCandidate(user, chatId, messageId, cqId, arg, originalText = "") {
   const pending = user.settings?.pending;
   const i = Number(arg);
   const pick = pending?.action === "find" ? pending.candidates?.[i] : null;
@@ -754,18 +754,24 @@ async function trackCandidate(user, chatId, messageId, cqId, arg) {
   }
   await clearPending(user);
   await answerCallback(BOT_TOKEN, cqId, "Adding…");
-  // Drop the buttons so the same result can't be tapped twice. Telegram keeps the
-  // old keyboard unless it's explicitly replaced, so an EMPTY one is the removal.
-  await editMessage(BOT_TOKEN, chatId, messageId, `Tracking: ${pick.title}\n${pick.url}`,
+  // KEEP THE LIST, drop only the buttons. Replacing the card with a one-line
+  // confirmation threw away the other options — and the whole point of showing
+  // three is that you might want to come back to the ones you didn't take.
+  // Telegram keeps the old keyboard unless explicitly replaced, so an EMPTY
+  // keyboard is the removal.
+  await editMessage(BOT_TOKEN, chatId, messageId,
+    `${originalText}\n\n✅ Tracking #${i + 1} — ${pick.title}`,
     { keyboard: { inline_keyboard: [] } });
   return addItem(user, chatId, pick.url);
 }
 
-async function dismissCandidates(user, chatId, messageId, cqId) {
+async function dismissCandidates(user, chatId, messageId, cqId, originalText = "") {
   await clearPending(user);
   await answerCallback(BOT_TOKEN, cqId);
+  // Same rule as tracking: the list stays, the buttons go. What was found is
+  // worth keeping on screen even when none of it was wanted today.
   return editMessage(BOT_TOKEN, chatId, messageId,
-    "No problem — nothing added.\n\nTry naming the brand and the product, or paste the link if you find it yourself.",
+    `${originalText}\n\n— Nothing added. The links above still work if you change your mind.`,
     { keyboard: { inline_keyboard: [] } });
 }
 
@@ -1116,8 +1122,8 @@ async function handleCallback(cq) {
     case "Pa": return applyDefaultEvery(user, chatId, messageId, cq.id, "both", arg);
     // Search results: the button carries an index into the candidates parked on
     // the user's row, so there's no subscription to own yet.
-    case "f":  return trackCandidate(user, chatId, messageId, cq.id, arg);
-    case "fx": return dismissCandidates(user, chatId, messageId, cq.id);
+    case "f":  return trackCandidate(user, chatId, messageId, cq.id, arg, cq.message?.text ?? "");
+    case "fx": return dismissCandidates(user, chatId, messageId, cq.id, cq.message?.text ?? "");
   }
 
   const sub = subId === undefined ? null : await ownedSub(user.id, subId);
