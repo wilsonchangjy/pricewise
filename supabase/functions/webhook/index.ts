@@ -518,6 +518,19 @@ function inBackground(p) {
 }
 
 /**
+ * How long we're willing to hold the webhook open for a search.
+ *
+ * Telegram re-delivers an update it hasn't seen a 200 for in about a minute, so
+ * this has to stay under that. Everything else about the timing is measured:
+ * a typical search is 15–35s (Uniqlo 14.5s, Jacquemus 26.8s, Castlery 36s), and
+ * the slow tail is a bot-protected shop climbing unblocker tiers.
+ */
+const SEARCH_DEADLINE_MS = 50_000;
+
+/** A correction supersedes a search; an unrelated question an hour later does not. */
+const SUPERSEDE_WINDOW_MS = 3 * 60_000;
+
+/**
  * Fix a typo and Telegram sends the correction as a NEW update (edited_message),
  * so both the typo and the correction ran as separate searches — two "looking
  * for…" messages, two answers, two lots of the user's model credits. Observed
@@ -530,9 +543,13 @@ function inBackground(p) {
  * was ever sent.
  */
 async function findItems(user, chatId, query) {
+  // Supersede a search only while it could still be a CORRECTION of itself.
+  // Unbounded, this deleted a "looking for Uniqlo" message an hour after the
+  // fact when an unrelated question was asked — because the Uniqlo search had
+  // died without ever clearing its marker, so it looked forever in-flight.
   const previous = user.settings?.search;
-  if (previous?.ackMessageId) {
-    // A search is already running: it's now stale, so take its ack off screen.
+  const recent = previous?.startedAt && Date.now() - previous.startedAt < SUPERSEDE_WINDOW_MS;
+  if (previous?.ackMessageId && recent) {
     await deleteMessage(BOT_TOKEN, chatId, previous.ackMessageId);
   }
 
@@ -541,18 +558,71 @@ async function findItems(user, chatId, query) {
 
   const settings = {
     ...(user.settings ?? {}),
-    search: { token, query, ackMessageId: ack?.result?.message_id ?? null },
+    search: { token, query, startedAt: Date.now(), ackMessageId: ack?.result?.message_id ?? null },
   };
   user.settings = settings;
   await db.from("users").update({ settings }).eq("id", user.id);
 
-  return inBackground(runSearch(user, chatId, query, token));
+  // THE WORK RUNS INLINE, not in the background.
+  //
+  // It used to be handed to EdgeRuntime.waitUntil so the webhook could answer
+  // Telegram instantly. That is not a place a 15-second job survives: once we
+  // return 200 the isolate is reclaimed, the search dies mid-flight, and the
+  // only trace was a console.error nobody reads. Live result — two searches,
+  // an acknowledgement each, and then silence forever.
+  //
+  // So: await it, bounded by a deadline that keeps us inside Telegram's retry
+  // window. Whatever happens, the user hears back.
+  const work = runSearch(user, chatId, query, token);
+  const TIMED_OUT = Symbol("deadline");
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), SEARCH_DEADLINE_MS);
+  });
+
+  const outcome = await Promise.race([
+    work.then(() => "done", (e) => e ?? new Error("search failed")),
+    deadline,
+  ]);
+  clearTimeout(timer);
+
+  if (outcome === TIMED_OUT) {
+    // Still going. Say so — then let it finish opportunistically. If the isolate
+    // survives, the results still arrive; if it doesn't, the user has been told
+    // rather than left waiting on a message that will never come.
+    await reply(chatId, [
+      `Still looking for “${query}” — it's taking longer than usual, which usually`,
+      "means a shop that's slow to answer.",
+      "",
+      "I'll send results if they land. If nothing arrives in a minute or two, ask me",
+      "again — I remember where I've already looked, so a retry is quick and cheap.",
+    ].join("\n"));
+    return inBackground(work);
+  }
+
+  if (outcome !== "done") {
+    console.error("search failed:", outcome);
+    await clearSearchToken(user, token);
+    return reply(chatId, [
+      `Something went wrong searching for “${query}” — that's my end, not yours.`,
+      "Try again in a moment, or paste the product link and I'll track it directly.",
+    ].join("\n"));
+  }
 }
 
-/** Is this search still the one the user is waiting for? */
+/**
+ * Is this search still the one the user is waiting for?
+ *
+ * FAILS OPEN, deliberately. Only a DIFFERENT token in the row supersedes this
+ * search — a read error, or a missing marker, means "I can't tell", and the
+ * right answer then is to report. A duplicate message is a small annoyance; a
+ * silently discarded answer is the bug that brought us here.
+ */
 async function stillCurrent(user, token) {
-  const { data } = await db.from("users").select("settings").eq("id", user.id).maybeSingle();
-  return (data?.settings?.search?.token ?? null) === token;
+  const { data, error } = await db.from("users").select("settings").eq("id", user.id).maybeSingle();
+  if (error) return true;
+  const current = data?.settings?.search?.token ?? null;
+  return current === null || current === token;
 }
 
 /** Done reporting — drop the marker so a later edit doesn't delete a live ack. */
