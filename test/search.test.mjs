@@ -460,3 +460,62 @@ test("free reads are bounded so one search can't parse the world", async () => {
     assert.equal(out.length, 4, "twelve readable candidates, four read");
   } finally { globalThis.fetch = real; }
 });
+
+// ── a price tracker result without a price is not a result ─────────────────
+// Live: a hallucinated URL — cetaphil.com/sg/vitamin-c-serum/987654321.html,
+// an invented id — resolved to *a* readable page and came back with
+// price: undefined. It would have been shown as "undefined USD".
+test("a reading with no price is dropped, however readable the page was", async () => {
+  const { verifyCandidates } = await import("../supabase/functions/_shared/search.mjs");
+  const priceless = JSON.stringify({ title: "Mystery", variants: [{ id: 1, title: "M", available: true }] });
+  const priced = JSON.stringify({ title: "Real", price: 2400, variants: [{ id: 1, title: "M", available: true, price: 2400 }] });
+
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    const body = String(u).includes("/nothing.js") ? priceless
+               : String(u).includes("/real.js") ? priced : null;
+    return body
+      ? { ok: true, status: 200, url: String(u), headers: new Headers(), text: async () => body }
+      : { ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" };
+  };
+  try {
+    const out = await verifyCandidates([
+      { url: "https://shop.test/products/nothing", hint: "" },
+      { url: "https://shop.test/products/real", hint: "" },
+    ], {});
+    assert.equal(out.length, 1);
+    assert.match(out[0].url, /real/, "the priceless page is readable but useless to a price tracker");
+  } finally { globalThis.fetch = real; }
+});
+
+// ── telling a category apart from a product ────────────────────────────────
+// "vitamin c serum" names no brand, so the honest results are three unrelated
+// serums. Judged by the ANSWER rather than by a list of generic words: results
+// that share no distinctive word are different products.
+test("three different products read as a broad query", async () => {
+  const { looksBroad } = await import("../supabase/functions/_shared/search.mjs");
+  const t = (title) => ({ reading: { title } });
+  assert.equal(looksBroad([
+    t("Cetaphil Bright Healthy Radiance Serum"),
+    t("The Ordinary Ascorbyl Glucoside Solution"),
+    t("Beauty of Joseon Light On Serum"),
+  ], "vitamin c serum"), true,
+    "they share only 'serum', which is the word they all matched ON");
+});
+
+test("the same product at three shops does NOT read as broad", async () => {
+  const { looksBroad } = await import("../supabase/functions/_shared/search.mjs");
+  const t = (title) => ({ reading: { title } });
+  assert.equal(looksBroad([
+    t("Our Legacy Camion Boot"),
+    t("OUR LEGACY Camion Leather Boots"),
+    t("Our Legacy — Camion Boots Black"),
+  ], "Our Legacy Camion boots in black"), false,
+    "the titles are almost entirely the query itself — one product, three retailers");
+});
+
+test("too few results to judge means no opinion", async () => {
+  const { looksBroad } = await import("../supabase/functions/_shared/search.mjs");
+  assert.equal(looksBroad([{ reading: { title: "Anything At All" } }], "anything"), false);
+  assert.equal(looksBroad([], "x"), false);
+});

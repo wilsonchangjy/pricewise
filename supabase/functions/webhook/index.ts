@@ -27,7 +27,7 @@ import {
   setEveryIntervalKeyboard, setEveryScopeKeyboard, prefsSizeCategoryKeyboard,
   colourKeyboard, variantColours, candidateKeyboard,
 } from "../_shared/keyboards.mjs";
-import { findProduct, MAX_CANDIDATES } from "../_shared/search.mjs";
+import { findProduct, looksBroad, MAX_CANDIDATES } from "../_shared/search.mjs";
 import { AI_PROVIDERS, detectAiProvider } from "../_shared/ai.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -740,6 +740,14 @@ async function runSearch(user, chatId, query, token) {
     ...(foreign
       ? ["", `⚠️ Marked pages are a different country's site${country ? ` (you shop ${country})` : ""} — I couldn't find`,
          "a local one for that item, so the price and stock may not apply to you."]
+      : []),
+    // These three share almost no words, so they're three different products
+    // rather than one product at three shops — which only happens when the
+    // description named a category instead of an item.
+    ...(looksBroad(found, query)
+      ? ["", "These are different products, not the same one at three shops — “" + query + "”",
+         "reads as a category. Naming the brand and product gets you the actual item",
+         "(\"Sunday Riley C.E.O. vitamin C serum\" rather than \"vitamin c serum\")."]
       : []),
   ].join("\n"), { keyboard: candidateKeyboard(found.length) });
 }

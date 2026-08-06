@@ -282,6 +282,14 @@ export async function verifyCandidates(candidates, ctx = {}, acc = null) {
 
       const reading = await selectAdapter(d.adapter)(item, ctx);
       if (!reading?.ok) return null;
+
+      // A PRICE TRACKER RESULT WITHOUT A PRICE IS NOT A RESULT.
+      // Live: a hallucinated URL — cetaphil.com/sg/vitamin-c-serum/987654321.html,
+      // an invented id — resolved to *a* readable page and came back with
+      // price: undefined. It would have been offered as "undefined USD". The
+      // adapters are right to report a page they could partly read; search is
+      // the layer that must decide such a reading is not worth showing.
+      if (reading.price == null || !Number.isFinite(Number(reading.price))) return null;
       return {
         url: d.url, adapter: d.adapter, reading, hint: d.hint,
         free: isFree(d.adapter),
@@ -534,4 +542,47 @@ export async function aiSearchSource(query, ctx = {}) {
   const hits = res.ok ? (res.candidates ?? []) : [];
   if (!res.ok) hits.note = res.reason;
   return hits;
+}
+
+/**
+ * Did this query identify a PRODUCT, or just a product category?
+ *
+ * "vitamin c serum" names no brand, so the honest results are three unrelated
+ * serums from three unrelated brands — technically found, practically a shrug.
+ * Rather than judge the words (which needs an ever-growing list of generic
+ * terms), judge the ANSWER.
+ *
+ * The subtlety that a first attempt got wrong: those three titles DO share a
+ * word — "serum" — so naive overlap says "same product". But that word came
+ * from the query; it is what they all matched ON, not evidence they are the
+ * same thing. So the query's own words are discounted, and what remains is
+ * asked to overlap:
+ *
+ *   "Our Legacy Camion boots"  -> titles are almost entirely query words, so
+ *                                 little remains and nothing disagrees -> specific
+ *   "vitamin c serum"          -> Cetaphil / Ordinary / Joseon remain, sharing
+ *                                 nothing -> broad
+ */
+export function looksBroad(verified, query = "") {
+  if ((verified?.length ?? 0) < 2) return false;
+
+  const tokens = (s) =>
+    String(s ?? "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/)
+      .filter((w) => w.length >= 5);
+
+  const asked = new Set(tokens(query));
+  const sets = verified
+    .map((v) => new Set(tokens(v.reading?.title || v.hint).filter((w) => !asked.has(w))))
+    .filter((s) => s.size);
+
+  // Fewer than two titles have anything left to compare: everything they say is
+  // what was asked for, which is what a precise query looks like.
+  if (sets.length < 2) return false;
+
+  for (let i = 0; i < sets.length; i++) {
+    for (let j = i + 1; j < sets.length; j++) {
+      for (const w of sets[i]) if (sets[j].has(w)) return false;
+    }
+  }
+  return true;
 }

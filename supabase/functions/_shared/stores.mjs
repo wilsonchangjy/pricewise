@@ -28,6 +28,7 @@ export const STORES = [
   { adapter: "mango", name: "Mango", perSize: true },
   { adapter: "wix", name: "Wix stores", perSize: true },
   { adapter: "woocommerce", name: "Any WooCommerce store", perSize: true, note: "about a third of all shops online" },
+  { adapter: "jsonld", name: "Space NK", perSize: true, note: "beauty and skincare; sizes read per variant" },
   { adapter: "jsonld", name: "Most other shops", perSize: false, note: "read automatically where a site publishes standard product data" },
 
   { adapter: "amazon", name: "Amazon", perSize: true, note: "each size is its own listing" },
