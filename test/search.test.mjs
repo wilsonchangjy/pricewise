@@ -395,3 +395,68 @@ test("an empty result is never cached", async () => {
     assert.equal(wrote, 0);
   } finally { globalThis.fetch = real; }
 });
+
+// ── one bad candidate must not sink the search ──────────────────────────────
+// Promise.all rejects the instant any entry does, so an unguarded throw in the
+// per-candidate work took down every OTHER candidate with it. Because a model
+// returns different URLs each run, that presented as failing at random: live,
+// "Jacquemus Bastide jacket" worked and "Jacquemus Bastide jacket black" a
+// minute later returned "something went wrong".
+test("a candidate that throws is dropped, and the others still come back", async () => {
+  const { verifyCandidates } = await import("../supabase/functions/_shared/search.mjs");
+  const good = JSON.stringify({ title: "Good", price: 100, variants: [{ id: 1, title: "M", available: true, price: 100 }] });
+
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    // A URL whose very shape blows up anything that tries to parse it.
+    if (String(u).includes("detonate")) throw new TypeError("Cannot read properties of undefined");
+    return String(u).includes("/products/good.js")
+      ? { ok: true, status: 200, url: String(u), headers: new Headers(), text: async () => good }
+      : { ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" };
+  };
+  try {
+    const out = await verifyCandidates([
+      { url: "https://shop.test/products/detonate", hint: "" },
+      { url: "https://shop.test/products/good", hint: "" },
+    ], {});
+    assert.equal(out.length, 1, "the survivor still reaches the user");
+    assert.match(out[0].url, /good/);
+  } finally { globalThis.fetch = real; }
+});
+
+test("the whole search survives a candidate that throws", async () => {
+  const { findProduct } = await import("../supabase/functions/_shared/search.mjs");
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    if (String(u).includes("detonate")) throw new TypeError("boom");
+    return { ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" };
+  };
+  try {
+    const source = async () => ([{ url: "https://shop.test/products/detonate", hint: "" }]);
+    const out = await findProduct("anything", { sources: [source] });
+    assert.deepEqual([...out], [], "found nothing — which is an ANSWER, not an exception");
+  } finally { globalThis.fetch = real; }
+});
+
+// Free of credits is not free of work: each read parses a whole product page,
+// and an Edge Function has a CPU budget. Asserted on the OUTCOME rather than on
+// request counts, because Shopify's detection probe and its read are the same
+// URL — counting fetches would measure detection, not reading.
+test("free reads are bounded so one search can't parse the world", async () => {
+  const { verifyCandidates } = await import("../supabase/functions/_shared/search.mjs");
+  const page = (n) => JSON.stringify({
+    title: `P${n}`, price: 100, variants: [{ id: n, title: "M", available: true, price: 100 }],
+  });
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    const m = String(u).match(/\/products\/p(\d+)\.js/);
+    return m
+      ? { ok: true, status: 200, url: String(u), headers: new Headers(), text: async () => page(m[1]) }
+      : { ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" };
+  };
+  try {
+    const many = Array.from({ length: 12 }, (_, i) => ({ url: `https://shop.test/products/p${i}`, hint: "" }));
+    const out = await verifyCandidates(many, { maxFreeReads: 4 });
+    assert.equal(out.length, 4, "twelve readable candidates, four read");
+  } finally { globalThis.fetch = real; }
+});

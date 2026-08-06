@@ -48,6 +48,14 @@ const GUESS_BUDGET_MS = 12_000;
  */
 const MAX_DEFENDED_READS = 3;
 
+/**
+ * ...and how many FREE pages. Free of credits is not free of work: every read
+ * parses a full product page, and doing ten at once in an Edge Function with a
+ * CPU budget is a lot of parsing to produce a list of three. Six leaves spares
+ * for candidates that turn out not to verify.
+ */
+const MAX_FREE_READS = 6;
+
 /** Shops whose search we can query for free, by platform. */
 const SHOPIFY_SUGGEST = (origin, q) =>
   `${origin}/search/suggest.json?q=${encodeURIComponent(q)}&resources%5Btype%5D=product&resources%5Blimit%5D=6`;
@@ -245,31 +253,47 @@ export async function verifyCandidates(candidates, ctx = {}, acc = null) {
   // latency reason to stop early, but each defended read still spends the
   // user's credits, so the number of them is bounded explicitly rather than
   // falling out of whatever order the sources happened to return.
-  const free = detected.filter((d) => isFree(d.adapter));
+  // Free reads cost no credits, but they are not free of CPU and memory: each
+  // one parses a full product page, and an Edge Function that does ten at once
+  // is doing far more work than a result list of three can justify. Cap them
+  // too — generously, since spares cover candidates that fail to verify.
+  const free = detected.filter((d) => isFree(d.adapter))
+    .slice(0, ctx.maxFreeReads ?? MAX_FREE_READS);
   const paid = detected.filter((d) => !isFree(d.adapter))
     .slice(0, ctx.maxDefendedReads ?? MAX_DEFENDED_READS);
 
   const readings = await Promise.all([...free, ...paid].map(async (d) => {
-    // Resolve the ids the adapter needs FROM THE URL, exactly as /add does.
-    // Skipping this was a silent, whole-category failure: Uniqlo wants a
-    // productCode, the Inditex brands want store/catalog/product ids, and
-    // without them their readers refuse with "missing variantSelector". Every
-    // search result we ever produced came from an adapter that happens to work
-    // off the URL alone (Shopify, Woo, END, the JSON-LD readers) — the rest
-    // looked like "couldn't find it" when they were never actually asked.
-    const item = await resolveItem(d, ctx);
-    if (!item) return null;
+    // ONE CANDIDATE MUST NEVER BE ABLE TO FAIL THE WHOLE SEARCH.
+    //
+    // Promise.all rejects the moment any entry does, so an unguarded throw
+    // anywhere in here took down every other candidate with it — and since a
+    // model returns different URLs every run, that presented as a search failing
+    // at random. Live: "Jacquemus Bastide jacket" worked, "Jacquemus Bastide
+    // jacket black" a minute later did not. resolveSelector was the unguarded
+    // step; the catch is deliberately around ALL of it rather than that one
+    // call, because the next unguarded step shouldn't get to repeat this.
+    try {
+      // Resolve the ids the adapter needs FROM THE URL, exactly as /add does.
+      // Skipping this was a silent, whole-category failure: Uniqlo wants a
+      // productCode, the Inditex brands want store/catalog/product ids, and
+      // without them their readers refuse with "missing variantSelector".
+      const item = await resolveItem(d, ctx);
+      if (!item) return null;
 
-    const reading = await selectAdapter(d.adapter)(item, ctx).catch(() => null);
-    if (!reading?.ok) return null;
-    return {
-      url: d.url, adapter: d.adapter, reading, hint: d.hint,
-      free: isFree(d.adapter),
-      // What country's site this is, when the URL says. Drives both ranking and
-      // the warning on the result line — a price we can't act on should never
-      // look like a price we can.
-      country: localeFromUrl(d.url).country,
-    };
+      const reading = await selectAdapter(d.adapter)(item, ctx);
+      if (!reading?.ok) return null;
+      return {
+        url: d.url, adapter: d.adapter, reading, hint: d.hint,
+        free: isFree(d.adapter),
+        // What country's site this is, when the URL says. Drives both ranking
+        // and the warning on the result line — a price we can't act on should
+        // never look like a price we can.
+        country: localeFromUrl(d.url).country,
+      };
+    } catch (e) {
+      console.warn(`search: dropped ${d.url} (${d.adapter}): ${e?.message ?? e}`);
+      return null;
+    }
   }));
 
   out.push(...readings.filter(Boolean));
