@@ -6,6 +6,8 @@
 // cheap Shopify `.js` probe → a page-signal sniff. Portable (Node + Deno: uses
 // global fetch only, no deps).
 
+import { hasJsonLdProduct } from "./adapters/jsonld.mjs";
+
 // Known brands, matched on hostname. (itxrest brands still need store/catalog/
 // productId resolved from the page — see resolveHints below.)
 export const HOST_MAP = [
@@ -144,7 +146,12 @@ export async function detectAdapter(url, { fetchImpl = fetch } = {}) {
   if (pg.ok) {
     if (pg.text.includes('"catalog":{"product":{')) return { adapter: "wix", strategy: "direct", via: "page-signal" };
     if (/"@type"\s*:\s*"ProductGroup"/.test(pg.text)) return { adapter: "jsonld", strategy: "direct", via: "page-signal" };
-    if (pg.text.includes("application/ld+json")) return { adapter: "jsonld", strategy: "direct", via: "page-signal" };
+    // A page merely CONTAINING ld+json is not a page we can read: breadcrumb,
+    // organisation and website markup all match that. shoptsuchi.com was
+    // accepted on this signal and then failed every single check with "no
+    // JSON-LD Product/ProductGroup found" — accepted at /add, unreadable
+    // forever. Ask for what the parser actually needs.
+    if (hasJsonLdProduct(pg.text)) return { adapter: "jsonld", strategy: "direct", via: "page-signal" };
   }
 
   return { adapter: null, via: "unknown", message: `unsupported site (${host}) — no adapter matched` };

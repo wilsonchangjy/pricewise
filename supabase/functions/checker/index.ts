@@ -457,14 +457,24 @@ async function recordFailure(product, message, kind = "error", subs = null) {
   const backoff = nextCheckDelayMinutes(product.check_interval_minutes, failures, !!product.last_ok_at);
   console.warn(`product ${product.id} (${product.adapter}) failed x${failures}: ${message}`);
 
-  // Silence is the one thing a watcher must never do. Speak up once when we start
-  // backing off, and once more when we give up — the equality checks keep it to
-  // exactly two messages per broken item.
-  if (failures === NOTIFY_AFTER || failures === MAX_FAILURES) {
+  // Silence is the one thing a watcher must never do.
+  //
+  // A product that has NEVER produced a reading is a different case from one
+  // that broke: the user added it minutes ago and is waiting for the baseline we
+  // promised them. Waiting for the third failure to speak meant over an hour of
+  // nothing — from their side indistinguishable from the bot forgetting. So the
+  // FIRST failure on a never-baselined item is announced immediately; after
+  // that, the usual two messages (backing off, and giving up).
+  const neverWorked = !product.last_ok_at;
+  const speak = (neverWorked && failures === 1) || failures === NOTIFY_AFTER || failures === MAX_FAILURES;
+
+  if (speak) {
     const watchers = subs ?? (await db.from("subscriptions")
       .select("*, users(telegram_chat_id)").eq("product_id", product.id).eq("status", "active")).data ?? [];
     const text = failures >= MAX_FAILURES
       ? `❌ I've given up on ${product.title}\nIt failed ${failures} checks in a row (${message}).\nIt's off your check list — send the link again if you think it's fixed.\n${product.url}`
+      : neverWorked && failures === 1
+      ? `⚠️ I couldn't read ${product.title} on the first try.\n${message}\nThat's the baseline I promised you — I'll keep retrying, and tell you if it starts working or if I give up.\n${product.url}`
       : `⚠️ I'm having trouble reading ${product.title}\n${message}\nI'll keep trying, less often. If it never recovers I'll tell you.\n${product.url}`;
     for (const w of watchers) await sendMessage(BOT_TOKEN, w.users.telegram_chat_id, text);
   }

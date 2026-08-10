@@ -11,6 +11,7 @@
 
 import { httpGet } from "../fetcher.mjs";
 import { landedElsewhere, landedElsewhereResult } from "../landed.mjs";
+import { parseMoney } from "../money.mjs";
 
 const offerOf = (x) => (Array.isArray(x?.offers) ? x.offers[0] : x?.offers);
 
@@ -28,14 +29,13 @@ const specOf = (offer) => specs(offer).find((x) => !/Strikethrough|ListPrice/i.t
 // entry threw the discount away.
 const compareAtOf = (offer) => {
   const struck = specs(offer).find((x) => /Strikethrough|ListPrice/i.test(x?.priceType ?? ""));
-  const raw = struck?.price ?? offer?.highPrice;
-  return raw != null ? Number(raw) : undefined;
+  return parseMoney(struck?.price ?? offer?.highPrice);
 };
 
-const priceOf = (offer) => {
-  const raw = offer?.price ?? specOf(offer)?.price;
-  return raw != null ? Number(raw) : undefined;
-};
+// parseMoney, not Number: a German shop writes 4386 as "4.386", and Number()
+// reads that as four-point-three-eight-six. See money.mjs — that misparse
+// silenced a real 774-euro drop.
+const priceOf = (offer) => parseMoney(offer?.price ?? specOf(offer)?.price);
 const currencyOf = (offer) => offer?.priceCurrency ?? specOf(offer)?.priceCurrency;
 const availOf = (offer) => {
   const a = String(offer?.availability ?? "").toLowerCase();
