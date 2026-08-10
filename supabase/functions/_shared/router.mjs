@@ -7,6 +7,7 @@
 // global fetch only, no deps).
 
 import { hasJsonLdProduct } from "./adapters/jsonld.mjs";
+import { isBase44, productIdOf } from "./adapters/base44.mjs";
 
 // Known brands, matched on hostname. (itxrest brands still need store/catalog/
 // productId resolved from the page — see resolveHints below.)
@@ -145,6 +146,12 @@ export async function detectAdapter(url, { fetchImpl = fetch } = {}) {
   const pg = await get(url, fetchImpl);
   if (pg.ok) {
     if (pg.text.includes('"catalog":{"product":{')) return { adapter: "wix", strategy: "direct", via: "page-signal" };
+    // Base44 shops are a shell with NO product in the HTML — the catalogue comes
+    // from a public entities endpoint. Checked before the JSON-LD sniff, which
+    // would otherwise see only their WebSite/Organization markup.
+    if (isBase44(pg.text) && productIdOf(url)) {
+      return { adapter: "base44", strategy: "direct", via: "base44-shell" };
+    }
     if (/"@type"\s*:\s*"ProductGroup"/.test(pg.text)) return { adapter: "jsonld", strategy: "direct", via: "page-signal" };
     // A page merely CONTAINING ld+json is not a page we can read: breadcrumb,
     // organisation and website markup all match that. shoptsuchi.com was

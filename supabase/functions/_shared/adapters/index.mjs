@@ -20,6 +20,7 @@ import { readCettire } from "./cettire.mjs";
 import { readNetaporter } from "./netaporter.mjs";
 import { readEnd } from "./endclothing.mjs";
 import { readWoocommerce } from "./woocommerce.mjs";
+import { readBase44 } from "./base44.mjs";
 import { readSsense } from "./ssense.mjs";
 import { readJsonLd } from "./jsonld.mjs";
 
@@ -43,6 +44,7 @@ const READERS = {
   netaporter: readNetaporter,
   end: readEnd,
   woocommerce: readWoocommerce,
+  base44: readBase44,
   ssense: readSsense,
   jsonld: readJsonLd,
 };

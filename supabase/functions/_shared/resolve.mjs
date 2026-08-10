@@ -71,6 +71,15 @@ export function resolveSelector(url, adapter) {
       // stock to read. Say so rather than implying the usual wedge.
       return { ok: true, selector: {}, watching: "this product (SSENSE doesn't publish per-size stock)" };
 
+    case "base44": {
+      // Base44 puts a 24-hex record id as the last path segment; the app id is
+      // read from the page at check time, so nothing else is needed here.
+      const id = u.pathname.split("/").filter(Boolean).pop() ?? "";
+      if (!/^[0-9a-f]{24}$/i.test(id)) {
+        return { ok: false, reason: "that link doesn't point at a single product — open the item and copy the URL from the address bar" };
+      }
+      return { ok: true, selector: { productId: id }, watching: "the whole product (this shop doesn't publish per-size stock)" };
+    }
     case "woocommerce": {
       const parts = u.pathname.split("/").filter(Boolean);
       const slug = parts[parts.length - 1];
