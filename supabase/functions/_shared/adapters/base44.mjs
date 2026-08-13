@@ -114,12 +114,32 @@ export async function readBase44(item) {
     return { ok: false, kind: "parse", message: "base44: no product id in the URL", checkedAt };
   }
 
-  // The app id lives in the page, so this costs one extra fetch per check. Both
-  // are free and small (a 7KB shell, then a JSON catalogue), which is a better
-  // trade than storing an id that would silently rot if the shop were rebuilt.
-  const appId = item.variantSelector?.appId ?? appIdOf(
-    (await httpGet(item.url, { headers: { accept: "text/html" } })).body ?? "",
-  );
+  // THE APP ID COMES FROM STORAGE FIRST, AND THE PAGE ONLY AS A FALLBACK.
+  //
+  // The first version fetched the page on EVERY check to re-derive an id that
+  // never changes, justified in a comment as avoiding an id that "would
+  // silently rot". That was backwards: it made a product whose data was
+  // perfectly readable depend on a page we did not need. Live proof — her shop
+  // started returning HTTP 402 "App Unavailable - Base44" (a billing/quota lapse
+  // on the shop's side) while the catalogue API kept serving 200 with the full
+  // product list. The item went dark for a reason that had nothing to do with
+  // the item.
+  let appId = item.variantSelector?.appId;
+  if (!appId) {
+    const page = await httpGet(item.url, { headers: { accept: "text/html" } });
+    if (!page.ok) {
+      // Say what actually happened. "Couldn't find the app id on the page" blamed
+      // our parsing for what was really the shop being down.
+      const kind = page.status === 403 ? "blocked" : page.error === "timeout" ? "timeout" : "http";
+      return {
+        ok: false, kind, status: page.status,
+        message: `base44: the shop's page returned ${page.status || page.error}` +
+                 (page.status === 402 ? " — the shop is unavailable on Base44 (billing or quota)" : ""),
+        checkedAt,
+      };
+    }
+    appId = appIdOf(page.body ?? "");
+  }
   if (!appId) {
     return { ok: false, kind: "soft", message: "base44: couldn't find the app id on the page", checkedAt };
   }

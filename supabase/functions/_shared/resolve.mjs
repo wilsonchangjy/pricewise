@@ -78,7 +78,12 @@ export function resolveSelector(url, adapter) {
       if (!/^[0-9a-f]{24}$/i.test(id)) {
         return { ok: false, reason: "that link doesn't point at a single product — open the item and copy the URL from the address bar" };
       }
-      return { ok: true, selector: { productId: id }, watching: "the whole product (this shop doesn't publish per-size stock)" };
+      // needsPage fetches the app id ONCE, now, and stores it. Every later check
+      // then goes straight to the catalogue API and never touches the page.
+      return {
+        ok: true, selector: { productId: id }, needsPage: "appId",
+        watching: "the whole product (this shop doesn't publish per-size stock)",
+      };
     }
     case "woocommerce": {
       const parts = u.pathname.split("/").filter(Boolean);
@@ -224,6 +229,12 @@ export async function resolveFromPage(url, { fetchImpl = safeFetch } = {}) {
     const r = await fetchImpl(url, { headers: { accept: "text/html", "user-agent": UA } });
     if (!r.ok) return { ok: false, reason: `couldn't open the product page (HTTP ${r.status})` };
     const html = await r.text();
+    // Base44 shops need the APP id, which the page leaks in its asset URLs. It
+    // never changes for a shop, so it is resolved ONCE here and stored — see
+    // base44.mjs for why reading it on every check was a mistake.
+    const appId = (html.match(/base44\.com\/images\/public\/([0-9a-f]{24})/i) || [])[1];
+    if (appId) return { ok: true, patch: { appId } };
+
     const productId =
       (html.match(/pelement=(\d+)/) || [])[1] ??
       (html.match(/"productId"\s*:\s*"?(\d{6,})"?/) || [])[1];

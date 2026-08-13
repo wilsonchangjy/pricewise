@@ -66,3 +66,60 @@ test("ids come from the URL, and the app id from the page's own asset links", ()
   assert.ok(isBase44('<script src="https://base44.app/x.js">'));
   assert.ok(!isBase44("<html>a normal shop</html>"));
 });
+
+// ── the outage that shouldn't have been one ────────────────────────────────
+// Live 2026-08-11: her shop's PAGE started returning HTTP 402
+// ("App Unavailable - Base44" — a billing/quota lapse on the shop's side) while
+// the catalogue API kept serving 200 with the full product list. The first
+// version re-derived the app id from the page on EVERY check, so a product whose
+// data was perfectly readable went dark — and reported it as "couldn't find the
+// app id on the page", blaming our parsing for the shop being down.
+async function withFetch(routes, fn) {
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const hit = Object.entries(routes).find(([frag]) => String(url).includes(frag));
+    if (!hit) return { ok: false, status: 404, url: String(url), headers: new Headers(), text: async () => "" };
+    const [, v] = hit;
+    return { ok: v.status < 400, status: v.status, url: String(url), headers: new Headers(), text: async () => v.body ?? "" };
+  };
+  try { return await fn(); } finally { globalThis.fetch = real; }
+}
+
+const APP = "69fa9cd23808f0e30b45fe77";
+const URL_ = "https://shoptsuchi.com/product/6a4df8e2e22b690c07b63074";
+const CAT = JSON.stringify([{ id: "6a4df8e2e22b690c07b63074", title: "Shell & Rose Petal Silk Necklace", price: 195, in_stock: true, size: "large" }]);
+
+test("a STORED app id means a dead shop page can't take the product down", async () => {
+  const { readBase44 } = await import("../supabase/functions/_shared/adapters/base44.mjs");
+  const r = await withFetch({
+    "/product/6a4df": { status: 402, body: "<html>App Unavailable - Base44</html>" },
+    "/entities/Product": { status: 200, body: CAT },
+  }, () => readBase44({ url: URL_, label: "", variantSelector: { appId: APP } }));
+
+  assert.equal(r.ok, true, "the catalogue is fine, so the reading must be fine");
+  assert.equal(r.price, 195);
+  assert.equal(r.title, "Shell & Rose Petal Silk Necklace");
+});
+
+test("without a stored id, a 402 is reported as the shop being down — not as our parse failing", async () => {
+  const { readBase44 } = await import("../supabase/functions/_shared/adapters/base44.mjs");
+  const r = await withFetch({
+    "/product/6a4df": { status: 402, body: "<html>App Unavailable - Base44</html>" },
+    "/entities/Product": { status: 200, body: CAT },
+  }, () => readBase44({ url: URL_, label: "" }));
+
+  assert.equal(r.ok, false);
+  assert.match(r.message, /returned 402/);
+  assert.match(r.message, /unavailable on Base44/, "name the actual cause, so nobody debugs the wrong thing");
+  assert.doesNotMatch(r.message, /couldn't find the app id/);
+});
+
+test("with no stored id and a working page, it still derives one", async () => {
+  const { readBase44 } = await import("../supabase/functions/_shared/adapters/base44.mjs");
+  const r = await withFetch({
+    "/product/6a4df": { status: 200, body: `<img src="https://media.base44.com/images/public/${APP}/logo.png">` },
+    "/entities/Product": { status: 200, body: CAT },
+  }, () => readBase44({ url: URL_, label: "" }));
+  assert.equal(r.ok, true);
+  assert.equal(r.price, 195);
+});
