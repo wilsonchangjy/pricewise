@@ -11,7 +11,7 @@ import { planAdd, MAX_DEFENDED, MAX_ITEMS, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, F
 import { detectAdapter } from "../_shared/router.mjs";
 import { sendMessage, deleteMessage, editMessage, answerCallback } from "../_shared/telegram.mjs";
 import { labelFromUrl } from "../_shared/label.mjs";
-import { localeFromUrl, currencyForCountry } from "../_shared/locale.mjs";
+import { localeFromUrl, currencyForCountry, MARKET_CHOICES, isKnownCountry } from "../_shared/locale.mjs";
 import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
 import { cleanUrl } from "../_shared/urlguard.mjs";
 import { expandUrl, isShortLink } from "../_shared/expand.mjs";
@@ -25,8 +25,7 @@ import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard,
   confirmRemoveKeyboard, backToItemKeyboard, targetKeyboard, prefsKeyboard,
   setEveryIntervalKeyboard, setEveryScopeKeyboard, prefsSizeCategoryKeyboard,
-  colourKeyboard, variantColours, candidateKeyboard,
-} from "../_shared/keyboards.mjs";
+  colourKeyboard, variantColours, candidateKeyboard, marketKeyboard, prefsCountryKeyboard } from "../_shared/keyboards.mjs";
 import { findProduct, looksBroad, MAX_CANDIDATES } from "../_shared/search.mjs";
 import { AI_PROVIDERS, detectAiProvider } from "../_shared/ai.mjs";
 
@@ -76,9 +75,9 @@ const HELP = [
   "(\"Our Legacy Camion boots in black\") and I'll go and find it.",
   "",
   "/list — your items. Tap one to set its size, a price-drop target, how often I check,",
-  "   to see its price history, or to remove it.",
+  "   which country's storefront to watch, to see its price history, or to remove it.",
   "/stores — which shops I can track, and which need a key.",
-  "/prefs — your defaults, limits, and unblocker credits.",
+  "/prefs — your defaults (sizes, check frequency, where you shop), limits and credits.",
   "/setkey <key> — add your own unblocker key for bot-protected stores.",
   "   (I delete that message from the chat the moment I read it — /providers lists the options.)",
   "/setaikey <key> — an Anthropic or OpenAI key, so I can search the web when the",
@@ -191,6 +190,8 @@ async function handle(msg, chatId, fromId) {
     case "setaikey":return intent.clear ? forgetAiKey(user, chatId) : setAiKey(user, chatId, intent.key);
     case "find":    return findItems(user, chatId, intent.query);
     case "providers": return showProviders(chatId);
+    case "market":  return setMarket(user, chatId, intent.ref, intent.value);
+    case "setcountry": return setDefaultCountry(user, chatId, intent.value);
     case "stores":  return reply(chatId, storesMessage());
     default:        return reply(chatId, intent.message ?? "Unknown command. Try /help.");
   }
@@ -276,7 +277,17 @@ async function addItem(user, chatId, rawUrl) {
   // same variant is 240.00 and in stock on the UK storefront while being 380.00
   // and out of stock unpinned. Two people in different countries are watching
   // genuinely different offers, so they cannot share a row.
-  const market = await shopperCountry(user);
+  // PRECEDENCE: the link's own locale, then the account default.
+  //
+  // A URL that says /en-us/ or /sg/ has already answered the question — the
+  // person chose that storefront by pasting it, and overriding them with an
+  // account default would pin a US link to the SG market and then report prices
+  // nobody can buy at. The account default only fills the gap where the link is
+  // silent, which is exactly the path-less sites (Shopify Markets, most of the
+  // long tail) where there is nothing else to go on.
+  //
+  // A per-item pin set afterwards beats both — see setMarket().
+  const market = localeFromUrl(url).country ?? (await shopperCountry(user));
   let { data: product } = await db.from("tracked_products").select("*")
     .eq("url", url).eq("market", market ?? null).maybeSingle();
   if (!product) {
@@ -1152,6 +1163,8 @@ async function handleCallback(cq) {
     case "Ps": return showPrefsSizes(chatId, messageId, cq.id);
     case "Pc": return promptDefaultSize(user, chatId, messageId, cq.id, arg);
     case "Pe": return showEveryInterval(chatId, messageId, cq.id);
+    case "Pm": return showPrefsCountry(user, chatId, messageId, cq.id);
+    case "Pn": return applyDefaultCountry(user, chatId, messageId, cq.id, arg);
     case "Pi": return showEveryScope(chatId, messageId, cq.id, arg);
     case "Pf": return applyDefaultEvery(user, chatId, messageId, cq.id, "free", arg);
     case "Pd": return applyDefaultEvery(user, chatId, messageId, cq.id, "def", arg);
@@ -1182,6 +1195,8 @@ async function handleCallback(cq) {
     case "t": return showTarget(sub, chatId, messageId, cq.id);
     case "T": return applyTarget(sub, chatId, messageId, cq.id, arg);
     case "h": return renderHistory(sub, chatId, messageId, cq.id);
+    case "m": return renderMarkets(user, sub, chatId, messageId, cq.id);
+    case "M": return applyMarket(user, sub, chatId, messageId, cq.id, arg);
     case "p":
     case "u": {
       const status = action === "p" ? "paused" : "active";
@@ -1243,6 +1258,7 @@ async function renderItem(sub, chatId, messageId, cqId) {
   const bits = [
     sub.variant_label ? `Watching: ${sub.variant_label}` : "Watching: every size",
     `Checked every ${intervalWord(sub.interval_minutes ?? FREE_INTERVAL_MIN)}`,
+    p.market ? `Storefront: ${p.market}${p.currency ? ` (${p.currency})` : ""}` : null,
     sub.last_alert_price != null ? `Last seen at ${fmt(Number(sub.last_alert_price), p.currency)}` : null,
     sub.target_price != null ? `Alerting below ${fmt(Number(sub.target_price), p.currency)}` : null,
     sub.status === "paused" ? "Currently muted" : null,
@@ -1347,6 +1363,189 @@ async function applyEvery(sub, chatId, messageId, cqId, value) {
 
   await answerCallback(BOT_TOKEN, cqId, `Every ${value}`);
   return renderItem(sub, chatId, messageId);
+}
+
+
+// ── market: which storefront is this item watched on? ───────────────────────
+//
+// A shop's price AND its per-size stock differ by market. Measured on
+// mutimer.co, size S, same URL and the same variant id: 240.00 and IN STOCK on
+// the UK storefront, 418.00 and SOLD OUT on the Singapore one. So the market is
+// part of what you are watching, not a way of displaying it — which is why
+// tracked_products is keyed (url, market), and why changing the market REPOINTS
+// the subscription at a different row instead of editing this one. Two people
+// watching two storefronts are watching two different offers and their
+// histories must not mix.
+
+/** The account default, always on the board even when it isn't shortlisted —
+ *  otherwise someone shopping from a country we didn't list sees their own
+ *  setting nowhere. */
+function marketChoicesFor(user) {
+  const cc = user?.settings?.country ? String(user.settings.country).toUpperCase() : "";
+  if (!cc || MARKET_CHOICES.some(([c]) => c === cc)) return MARKET_CHOICES;
+  return [...MARKET_CHOICES, [cc, cc]];
+}
+
+/** The row for this URL at that market, created if nobody watches it yet. */
+async function productForMarket(from, market) {
+  const { data: existing } = await db.from("tracked_products").select("*")
+    .eq("url", from.url).eq("market", market).maybeSingle();
+  if (existing) {
+    // It may have been retired when its last watcher left; bring it back rather
+    // than leaving a subscription pointed at a row the checker skips.
+    if (existing.status === "dead") {
+      await db.from("tracked_products")
+        .update({ status: "active", next_check_at: new Date().toISOString() })
+        .eq("id", existing.id);
+      existing.status = "active";
+    }
+    return existing;
+  }
+  const { data, error } = await db.from("tracked_products").insert({
+    url: from.url,
+    market,
+    currency: currencyForCountry(market) ?? null,
+    adapter: from.adapter,
+    fetch_strategy: from.fetch_strategy,
+    title: from.title,
+    variant_selector: from.variant_selector,
+    check_interval_minutes: from.check_interval_minutes,
+    next_check_at: new Date().toISOString(),
+  }).select("*").single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Move a subscription to another market.
+ *
+ * The baseline is CLEARED, deliberately. A history in AUD and a history in SGD
+ * are not one series, and joining them is exactly what sent two fabricated
+ * alerts on 2026-09-01 — "SGD 380.00 -> SGD 418.00 (+10%)", a figure that had
+ * never existed. Starting again and saying so is the honest option.
+ *
+ * variant_id survives: Shopify variant ids are stable across markets (verified
+ * on mutimer.co — all six sizes keep their ids from SG to GB), and if a variant
+ * really has gone the existing unmatched-size path picks it up.
+ */
+async function moveToMarket(sub, market) {
+  const from = sub.tracked_products;
+  const target = await productForMarket(from, market);
+  await db.from("subscriptions").update({
+    product_id: target.id,
+    last_alert_price: null,
+    last_alert_currency: null,
+    last_alert_status: null,
+  }).eq("id", sub.id);
+  if (target.id !== from.id) await retireIfOrphaned(from.id);
+  sub.product_id = target.id;
+  sub.tracked_products = target;
+  sub.last_alert_price = null;
+  sub.last_alert_status = null;
+  return target;
+}
+
+const marketNote = [
+  "Price and stock genuinely differ by market, so I start the price history",
+  "again rather than compare two currencies as though they were one.",
+].join("\n");
+
+async function renderMarkets(user, sub, chatId, messageId, cqId) {
+  if (cqId) await answerCallback(BOT_TOKEN, cqId);
+  const p = sub.tracked_products;
+  return editMessage(BOT_TOKEN, chatId, messageId, [
+    `🌐 Which storefront should I watch ${p.title} on?`,
+    "",
+    p.market
+      ? `Right now: ${p.market}${p.currency ? ` (${p.currency})` : ""}`
+      : "Right now: whichever the shop serves me — not pinned to one.",
+    "",
+    marketNote,
+  ].join("\n"), { keyboard: marketKeyboard(sub.id, p.market, marketChoicesFor(user)) });
+}
+
+async function applyMarket(user, sub, chatId, messageId, cqId, cc) {
+  const market = String(cc ?? "").toUpperCase();
+  if (!isKnownCountry(market)) {
+    return answerCallback(BOT_TOKEN, cqId, "I don't know how to price that market.", true);
+  }
+  if (String(sub.tracked_products.market ?? "") === market) {
+    await answerCallback(BOT_TOKEN, cqId, `Already on ${market}.`);
+    return renderItem(sub, chatId, messageId);
+  }
+  await moveToMarket(sub, market);
+  await answerCallback(BOT_TOKEN, cqId, `Now watching the ${market} storefront`);
+  return renderItem(sub, chatId, messageId);
+}
+
+/** The typed path. Same handler the button uses — see commands.mjs on why a
+ *  hidden command is worth keeping. */
+async function setMarket(user, chatId, ref, cc) {
+  const market = String(cc ?? "").toUpperCase();
+  if (!isKnownCountry(market)) {
+    return reply(chatId, `I don't know how to price “${cc}”. Try one of: ${MARKET_CHOICES.map(([c]) => c).join(", ")} — or open /list and tap 🌐 Market.`);
+  }
+  const subs = await subscriptionList(user.id);
+  const n = Number(ref);
+  if (!Number.isInteger(n) || n < 1 || n > subs.length) {
+    return reply(chatId, `Use the number from /list (1–${subs.length || 0}).`);
+  }
+  const sub = subs[n - 1];
+  const p = sub.tracked_products;
+  if (String(p.market ?? "") === market) {
+    return reply(chatId, `${p.title} is already watched on the ${market} storefront.`);
+  }
+  const target = await moveToMarket(sub, market);
+  return reply(chatId, [
+    `🌐 ${p.title} is now watched on the ${market} storefront${target.currency ? ` (${target.currency})` : ""}.`,
+    "",
+    marketNote,
+  ].join("\n"));
+}
+
+// ── /prefs → where you shop ─────────────────────────────────────────────────
+// The ACCOUNT default, which is the weakest of the three signals by design:
+// a link that names its own country keeps it, and a per-item pin beats both.
+
+async function showPrefsCountry(user, chatId, messageId, cqId) {
+  await answerCallback(BOT_TOKEN, cqId);
+  const set = user.settings?.country ? String(user.settings.country).toUpperCase() : "";
+  const current = set || (await shopperCountry(user));
+  return editMessage(BOT_TOKEN, chatId, messageId, [
+    "🌐 Where do you shop?",
+    "",
+    current
+      ? `Right now: ${current}${set ? "" : " — inferred from your links, not something you set"}`
+      : "Not set, and I have no links to infer it from yet.",
+    "",
+    "This is the default for items you add from here on. A link that already names",
+    "a country keeps its own, and anything you've pinned by hand stays pinned.",
+  ].join("\n"), { keyboard: prefsCountryKeyboard(current, marketChoicesFor(user)) });
+}
+
+async function saveCountry(user, market) {
+  const settings = { ...(user.settings ?? {}), country: market };
+  user.settings = settings;
+  await db.from("users").update({ settings }).eq("id", user.id);
+}
+
+async function applyDefaultCountry(user, chatId, messageId, cqId, cc) {
+  const market = String(cc ?? "").toUpperCase();
+  if (!isKnownCountry(market)) {
+    return answerCallback(BOT_TOKEN, cqId, "I don't know how to price that market.", true);
+  }
+  await saveCountry(user, market);
+  await answerCallback(BOT_TOKEN, cqId, `Shopping from ${market}`);
+  return renderPrefs(user, chatId, messageId);
+}
+
+async function setDefaultCountry(user, chatId, cc) {
+  const market = String(cc ?? "").toUpperCase();
+  if (!isKnownCountry(market)) {
+    return reply(chatId, `I don't know how to price “${cc}”. Try one of: ${MARKET_CHOICES.map(([c]) => c).join(", ")}.`);
+  }
+  await saveCountry(user, market);
+  return reply(chatId, `🌐 Noted — you shop from ${market}. That's the default for new items; anything already on your list keeps the storefront it's on (open /list and tap 🌐 Market to move one).`);
 }
 
 async function showTarget(sub, chatId, messageId, cqId) {

@@ -76,3 +76,22 @@ test("/every parses the interval option", () => {
   assert.deepEqual(parseCommand("/every 1 12H"), { cmd: "every", ref: "1", value: "12h" });
   assert.match(parseCommand("/every 1").message, /3h\|6h\|12h\|1d/);
 });
+
+// ── /market and /setcountry ─────────────────────────────────────────────────
+// Both are DELIBERATELY unadvertised: the /list button is the real UI. They
+// cost a parse case and a one-line switch arm each — the handler is shared with
+// the button — so keeping them is close to free for the people who do type.
+
+test("/market takes a list number and a country, and normalises the case", () => {
+  assert.deepEqual(parseCommand("/market 2 gb"), { cmd: "market", ref: "2", value: "GB" });
+});
+
+test("/market without both parts explains itself instead of guessing", () => {
+  assert.match(parseCommand("/market 2").message, /Usage: \/market/);
+  assert.match(parseCommand("/market").message, /Usage: \/market/);
+});
+
+test("/setcountry sets the account default", () => {
+  assert.deepEqual(parseCommand("/setcountry sg"), { cmd: "setcountry", value: "SG" });
+  assert.match(parseCommand("/setcountry").message, /Usage: \/setcountry/);
+});

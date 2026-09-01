@@ -45,7 +45,7 @@ export function itemKeyboard(subId, { showSize = true } = {}) {
   return {
     inline_keyboard: [
       row1,
-      [btn("🎯 Price", `t:${subId}`), btn("📈 History", `h:${subId}`)],
+      [btn("🎯 Price", `t:${subId}`), btn("📈 History", `h:${subId}`), btn("🌐 Market", `m:${subId}`)],
       [btn("🗑 Remove", `r:${subId}`), btn("◀︎ Back", "L")],
     ],
   };
@@ -75,7 +75,12 @@ export function targetKeyboard(subId, refPrice, { hasTarget = false } = {}) {
 // the per-item ownership lookup, alongside "L".
 
 export function prefsKeyboard() {
-  return { inline_keyboard: [[btn("📏 Default sizes", "Ps"), btn("⏱ Check frequency", "Pe")]] };
+  return {
+    inline_keyboard: [
+      [btn("📏 Default sizes", "Ps"), btn("⏱ Check frequency", "Pe")],
+      [btn("🌐 Where you shop", "Pm")],
+    ],
+  };
 }
 
 /** Default-size flow: pick the category, then the bot asks you to type the size
@@ -213,4 +218,47 @@ export const backToItemKeyboard = (subId) => ({ inline_keyboard: [[btn("◀︎ B
 function short(label, max = 18) {
   const s = String(label);
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
+}
+
+// ── market pickers ──────────────────────────────────────────────────────────
+// Two of them, because they answer different questions. The PER-ITEM one pins
+// this product to a storefront; the ACCOUNT one sets the default for items
+// added later. Neither touches the other — a per-item pin is the more specific
+// statement and always wins.
+
+/** Lay a market list out four to a row, ticking the current one. */
+function marketRows(choices, current, data) {
+  const cur = current ? String(current).toUpperCase() : "";
+  const rows = [];
+  for (let i = 0; i < choices.length; i += 4) {
+    rows.push(choices.slice(i, i + 4).map(([cc, label]) =>
+      btn(cc === cur ? `✓ ${label}` : label, data(cc))));
+  }
+  return rows;
+}
+
+/**
+ * Per-item: which storefront should this product be watched on?
+ *
+ * `current` is the market the row is pinned to today. The warning about
+ * re-baselining lives in the message, not here — a button that silently resets
+ * price history would be the same surprise the currency guard exists to prevent.
+ */
+export function marketKeyboard(subId, current, choices) {
+  return {
+    inline_keyboard: [
+      ...marketRows(choices, current, (cc) => `M:${subId}:${cc}`),
+      [btn("◀︎ Back", `i:${subId}`)],
+    ],
+  };
+}
+
+/** Account default: where you shop, for items added from here on. */
+export function prefsCountryKeyboard(current, choices) {
+  return {
+    inline_keyboard: [
+      ...marketRows(choices, current, (cc) => `Pn:_:${cc}`),
+      [btn("◀︎ Back", "P")],
+    ],
+  };
 }

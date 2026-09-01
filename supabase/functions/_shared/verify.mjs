@@ -45,21 +45,59 @@ export function comparePrices(ours, theirs) {
 }
 
 /**
+ * WHERE to read the second opinion from.
+ *
+ * It has to be the same storefront the reading came from. This used to fetch
+ * product.url bare, which on a market-pinned row is a different shop wearing the
+ * same name: the checker reads mutimer.co at ?country=SG and gets SGD 418, while
+ * this fetched the plain URL from Supabase's datacentre IP, got geo-routed to
+ * Australia, and read AUD 380. comparePrices() then did exactly what it should —
+ * refused to judge across currencies — and returned "unknown" every single time:
+ *
+ *     verify 17: unknown (currency differs (SGD vs AUD))
+ *     verify 18: unknown (currency differs (EUR vs AUD))
+ *
+ * So verification was silently switched OFF on precisely the rows most likely to
+ * need it. Not a wrong answer, which is why nothing caught it — just a safety net
+ * quietly declining to catch anything.
+ *
+ * ?country= is Shopify Markets' own switch and is confirmed to move the HTML
+ * page's JSON-LD, not only the .js endpoint (measured: the same page reads
+ * "priceCurrency": "AUD" / 380.00 bare and "SGD" / 418.00 with ?country=SG).
+ * Other adapters carry a market too, but nothing says their sites take this
+ * parameter, so they keep the plain URL — inventing a query string for them
+ * would be guessing, and a wrong second opinion is worse than none.
+ */
+export function verifyUrlFor(product) {
+  const market = product?.market ? String(product.market).toUpperCase() : "";
+  if (!market || product?.adapter !== "shopify") return product?.url;
+  try {
+    const u = new URL(product.url);
+    if (u.searchParams.has("country")) return u.toString(); // already pinned
+    u.searchParams.set("country", market);
+    return u.toString();
+  } catch {
+    return product.url;
+  }
+}
+
+/**
  * Fetch the product page and read its JSON-LD as an independent opinion.
  * Any failure is "unknown" — an unreachable second source must never be
  * mistaken for evidence that we're wrong.
  *
- * @param {{url:string, title?:string, currency?:string}} product
+ * @param {{url:string, title?:string, currency?:string, market?:string, adapter?:string}} product
  * @param {{price?:number, currency?:string}} reading
  */
 export async function verifyPrice(product, reading, { fetchImpl } = {}) {
   try {
+    const url = verifyUrlFor(product);
     const r = fetchImpl
-      ? await fetchImpl(product.url)
-      : await httpGet(product.url, { headers: { accept: "text/html" } });
+      ? await fetchImpl(url)
+      : await httpGet(url, { headers: { accept: "text/html" } });
     if (!r.ok) return { status: "unknown", reason: `page fetch failed (${r.status || r.error})` };
 
-    const second = parseJsonLd(r.body, { label: product.title ?? "", url: product.url, currency: reading.currency });
+    const second = parseJsonLd(r.body, { label: product.title ?? "", url, currency: reading.currency });
     if (!second.ok) return { status: "unknown", reason: second.message };
 
     return comparePrices(reading, second);

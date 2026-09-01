@@ -5,6 +5,7 @@ import {
   targetKeyboard, setEveryIntervalKeyboard, setEveryScopeKeyboard,
   prefsKeyboard, prefsSizeCategoryKeyboard,
   colourKeyboard, variantColours, variantSizeLabel, candidateKeyboard,
+  marketKeyboard, prefsCountryKeyboard,
 } from "../supabase/functions/_shared/keyboards.mjs";
 
 const allData = (kb) => kb.inline_keyboard.flat().map((b) => b.callback_data);
@@ -64,16 +65,16 @@ test("removal asks before doing", () => {
   assert.deepEqual(allData(kb), ["R:3", "i:3"]);
 });
 
-test("the item card offers size, every, price, history, remove — pause/resume retired", () => {
+test("the item card offers size, every, price, history, market, remove — pause/resume retired", () => {
   const data = allData(itemKeyboard(1));
-  assert.deepEqual(data, ["s:1", "e:1", "t:1", "h:1", "r:1", "L"]);
+  assert.deepEqual(data, ["s:1", "e:1", "t:1", "h:1", "m:1", "r:1", "L"]);
   assert.ok(!data.some((d) => d.startsWith("p:") || d.startsWith("u:")), "no pause/resume button");
 });
 
 test("the Size button is hidden for a single-option item", () => {
   const data = allData(itemKeyboard(1, { showSize: false }));
   assert.ok(!data.includes("s:1"), "no size button when there's nothing to pick");
-  assert.deepEqual(data, ["e:1", "t:1", "h:1", "r:1", "L"]);
+  assert.deepEqual(data, ["e:1", "t:1", "h:1", "m:1", "r:1", "L"]);
 });
 
 test("size buttons show the size alone — the redundant colour prefix is stripped", () => {
@@ -115,7 +116,7 @@ test("the /setevery flow: interval picker then three scopes, payload survives in
 });
 
 test("/prefs offers both default-sizes and check-frequency, and the size flow picks a category", () => {
-  assert.deepEqual(allData(prefsKeyboard()), ["Ps", "Pe"]);
+  assert.deepEqual(allData(prefsKeyboard()), ["Ps", "Pe", "Pm"]);
   assert.deepEqual(allData(prefsSizeCategoryKeyboard(["tops", "bottoms", "shoes"])),
     ["Pc:_:tops", "Pc:_:bottoms", "Pc:_:shoes", "P"]);
   assert.deepEqual(parseCallback("Pc:_:shoes"), { action: "Pc", subId: undefined, arg: "shoes" });
@@ -142,4 +143,36 @@ test("search-result buttons carry an index, never a URL", () => {
 test("the candidate list is capped, and always offers a way out", () => {
   assert.equal(candidateKeyboard(9).inline_keyboard[0].length, 3, "3 options is an answer; more is a menu");
   assert.deepEqual(candidateKeyboard(0).inline_keyboard, [[{ text: "None of these", callback_data: "fx" }]]);
+});
+
+// ── market pickers ──────────────────────────────────────────────────────────
+// The market is part of what you're watching, not a display setting: on
+// mutimer.co the same variant id is 240.00 and in stock on GB while being
+// 418.00 and sold out on SG. So this had to be reachable from the item itself.
+
+const CHOICES = [["SG", "🇸🇬 Singapore"], ["GB", "🇬🇧 UK"], ["US", "🇺🇸 US"], ["AU", "🇦🇺 Australia"], ["DE", "🇩🇪 Germany"]];
+
+test("the per-item market picker ticks the current storefront and comes back to the item", () => {
+  const kb = marketKeyboard(7, "GB", CHOICES);
+  assert.deepEqual(allData(kb), ["M:7:SG", "M:7:GB", "M:7:US", "M:7:AU", "M:7:DE", "i:7"]);
+  const labels = kb.inline_keyboard.flat().map((b) => b.text);
+  assert.ok(labels.some((l) => l.startsWith("✓") && l.includes("UK")), "the current one is marked");
+  assert.equal(labels.filter((l) => l.startsWith("✓")).length, 1);
+});
+
+test("an unpinned item has nothing ticked", () => {
+  const labels = marketKeyboard(7, null, CHOICES).inline_keyboard.flat().map((b) => b.text);
+  assert.equal(labels.filter((l) => l.startsWith("✓")).length, 0);
+});
+
+test("the account-default picker rides in the ARG slot, like the other prefs buttons", () => {
+  assert.deepEqual(allData(prefsCountryKeyboard("SG", CHOICES)),
+    ["Pn:_:SG", "Pn:_:GB", "Pn:_:US", "Pn:_:AU", "Pn:_:DE", "P"]);
+  assert.deepEqual(parseCallback("Pn:_:SG"), { action: "Pn", subId: undefined, arg: "SG" });
+});
+
+test("every market button stays inside Telegram's 64-byte callback_data cap", () => {
+  for (const b of marketKeyboard(999999, "SG", CHOICES).inline_keyboard.flat()) {
+    assert.ok(new TextEncoder().encode(b.callback_data).length <= 64, b.callback_data);
+  }
 });

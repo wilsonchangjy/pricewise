@@ -13,8 +13,10 @@
 #
 # The MENU is intentionally minimal — the tap-first item card (open via /list)
 # carries the per-item actions. Commands NOT listed here (/size, /every,
-# /setprice, /history, /remove, /setsize, /setevery, /providers) still WORK when
-# typed; they're just not advertised. /pause and /resume are retired entirely.
+# /setprice, /history, /remove, /setsize, /setevery, /providers, /market,
+# /setcountry) still WORK when typed; they're just not advertised. Each costs a
+# parse case and a one-line switch arm — the handler is the same one the button
+# calls — so keeping them is close to free. /pause and /resume are retired entirely.
 #
 # Usage:  TELEGRAM_BOT_TOKEN=... ./scripts/set-telegram-commands.sh
 #         (or run from the repo root with the token exported / in your .env)

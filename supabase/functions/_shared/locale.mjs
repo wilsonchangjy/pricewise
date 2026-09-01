@@ -41,3 +41,21 @@ export function localeFromUrl(url) {
 export function currencyForCountry(country) {
   return country ? COUNTRY_CURRENCY[String(country).toUpperCase()] : undefined;
 }
+
+/**
+ * The markets we offer as buttons. Not every country we can price — just the
+ * ones worth two taps, ordered so the common ones come first.
+ *
+ * Deliberately short. A market picker listing 40 countries is a worse answer
+ * than one listing eight and letting the rest be typed, because the point of
+ * the button is to avoid typing at all.
+ */
+export const MARKET_CHOICES = [
+  ["SG", "🇸🇬 Singapore"], ["GB", "🇬🇧 UK"], ["US", "🇺🇸 US"], ["AU", "🇦🇺 Australia"],
+  ["DE", "🇩🇪 Germany"], ["FR", "🇫🇷 France"], ["JP", "🇯🇵 Japan"], ["HK", "🇭🇰 Hong Kong"],
+];
+
+/** Do we know how to price this market? Guards typed input. */
+export function isKnownCountry(cc) {
+  return Boolean(cc && COUNTRY_CURRENCY[String(cc).toUpperCase()]);
+}

@@ -2,6 +2,7 @@
 // Edge Function maps intents to DB actions and replies.
 //
 // Supported: /add <url> (or a bare URL), /list, /remove <n>, /setprice <n> <p>,
+// /market <n> <cc>, /setcountry <cc>,
 // /pause <n>, /resume <n>, /setkey <key> (secret — webhook deletes the message),
 // /start, /help.
 
@@ -69,6 +70,19 @@ export function parseCommand(text) {
     case "/prefs":
     case "/preferences":
       return { cmd: "prefs" };
+    // Kept as a typed path even though the button in /list is the real UI.
+    // The marginal cost of a hidden command is a parse case and a one-line
+    // switch arm — the handler is the same one the button calls — so removing
+    // it would save nothing and cost the people who do type.
+    case "/market": {
+      const [ref, cc] = rest;
+      if (!ref || !cc) return { cmd: "market", message: "Usage: /market <number from /list> <country>  e.g. /market 2 GB" };
+      return { cmd: "market", ref, value: cc.toUpperCase() };
+    }
+    case "/setcountry": {
+      if (!arg) return { cmd: "setcountry", message: "Usage: /setcountry <country>  e.g. /setcountry SG" };
+      return { cmd: "setcountry", value: arg.trim().toUpperCase() };
+    }
     case "/setsize": {
       const [category, ...sizeWords] = rest;
       const size = sizeWords.join(" ").trim();
