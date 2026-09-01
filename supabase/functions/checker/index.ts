@@ -89,6 +89,10 @@ async function checkProduct(product) {
     url: product.url,
     adapter: product.adapter,
     variantSelector: product.variant_selector ?? {},
+    // Which storefront these readings are for. Without it a Shopify read
+    // reflects whatever geography this function happens to run in.
+    market: product.market ?? undefined,
+    currency: product.currency ?? undefined,
   };
 
   // Start at the tier we know works for this site, so we stop paying to

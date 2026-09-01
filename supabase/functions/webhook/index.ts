@@ -11,7 +11,7 @@ import { planAdd, MAX_DEFENDED, MAX_ITEMS, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, F
 import { detectAdapter } from "../_shared/router.mjs";
 import { sendMessage, deleteMessage, editMessage, answerCallback } from "../_shared/telegram.mjs";
 import { labelFromUrl } from "../_shared/label.mjs";
-import { localeFromUrl } from "../_shared/locale.mjs";
+import { localeFromUrl, currencyForCountry } from "../_shared/locale.mjs";
 import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
 import { cleanUrl } from "../_shared/urlguard.mjs";
 import { expandUrl, isShortLink } from "../_shared/expand.mjs";
@@ -270,8 +270,15 @@ async function addItem(user, chatId, rawUrl) {
     selector = { ...selector, ...page.patch };
   }
 
-  // One row per URL: N subscribers => 1 fetch.
-  let { data: product } = await db.from("tracked_products").select("*").eq("url", url).maybeSingle();
+  // One row per URL *AND MARKET*: N subscribers in the same market => 1 fetch.
+  //
+  // A shop's price and stock differ per market — measured on mutimer.co, the
+  // same variant is 240.00 and in stock on the UK storefront while being 380.00
+  // and out of stock unpinned. Two people in different countries are watching
+  // genuinely different offers, so they cannot share a row.
+  const market = await shopperCountry(user);
+  let { data: product } = await db.from("tracked_products").select("*")
+    .eq("url", url).eq("market", market ?? null).maybeSingle();
   if (!product) {
     // The global circuit breaker guards DISTINCT urls, because that's what costs
     // a fetch and a readings row. Joining something already watched is always
@@ -288,6 +295,8 @@ async function addItem(user, chatId, rawUrl) {
       .from("tracked_products")
       .insert({
         url,
+        market: market ?? null,
+        currency: market ? currencyForCountry(market) : null,
         adapter: plan.adapter,
         fetch_strategy: plan.strategy,
         title: (await fetchTitle(url)) ?? labelFromUrl(url),
@@ -329,6 +338,7 @@ async function addItem(user, chatId, rawUrl) {
     `👀 ${plan.message}`,
     product.title,
     `Watching: ${res.watching}.`,
+    ...(market ? [`Prices and stock from the ${market} storefront — say so if you shop a different one.`] : []),
     ...(await costNote(user, plan, product)),
     "I'll send a baseline reading shortly, then only when something changes.",
   ].join("\n"));

@@ -293,3 +293,55 @@ test("jsonld: unquoted type attributes are still JSON-LD (eBay serves them)", ()
   assert.equal(r.ok, true);
   assert.equal(r.price, 9.99);
 });
+
+// ── Shopify markets: the price and the stock are per-COUNTRY ────────────────
+// Measured live on mutimer.co 2026-09-01, one variant, one moment:
+//   no country hint  380.00  out of stock   (whatever geography the fetcher is in)
+//   ?country=GB      240.00  IN STOCK       (the UK warehouse has it)
+//   ?country=SG      418.00  out of stock
+// So an unpinned read is nobody's storefront, and the currency label has to come
+// from the same market as the number — this used to take the shop's BASE
+// currency from /meta.json, which could print an SGD price as "EUR".
+test("a pinned market reaches the request, and sets the currency", async () => {
+  const { readShopify } = await import("../supabase/functions/_shared/adapters/shopify.mjs");
+  const seen = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    seen.push(String(u));
+    return {
+      ok: true, status: 200, url: String(u), headers: new Headers(),
+      text: async () => JSON.stringify({
+        title: "Funnel Neck Blouson", price: 24000,
+        variants: [{ id: 46093353222340, title: "S", price: 24000, available: true }],
+      }),
+    };
+  };
+  try {
+    const r = await readShopify({
+      url: "https://mutimer.co/collections/all/products/funnel-neck-blouson",
+      market: "GB", label: "",
+    });
+    assert.ok(seen[0].includes("country=GB"), `market must reach the request: ${seen[0]}`);
+    assert.equal(r.currency, "GBP", "the currency is the MARKET's, not the shop's base");
+    assert.equal(r.price, 240);
+    assert.ok(!seen.some((u) => u.includes("meta.json")), "no need to ask the shop its base currency");
+  } finally { globalThis.fetch = real; }
+});
+
+test("an unpinned product still works, and still asks the shop its base currency", async () => {
+  const { readShopify } = await import("../supabase/functions/_shared/adapters/shopify.mjs");
+  const seen = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    seen.push(String(u));
+    const body = String(u).includes("meta.json")
+      ? JSON.stringify({ currency: "AUD" })
+      : JSON.stringify({ title: "X", price: 38000, variants: [{ id: 1, title: "S", price: 38000, available: false }] });
+    return { ok: true, status: 200, url: String(u), headers: new Headers(), text: async () => body };
+  };
+  try {
+    const r = await readShopify({ url: "https://mutimer.co/products/funnel-neck-blouson", label: "" });
+    assert.ok(!seen[0].includes("country="), "nothing to pin");
+    assert.equal(r.currency, "AUD");
+  } finally { globalThis.fetch = real; }
+});

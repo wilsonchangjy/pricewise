@@ -35,3 +35,9 @@ export function localeFromUrl(url) {
   const currency = country ? COUNTRY_CURRENCY[country] : undefined;
   return { country, currency };
 }
+
+/** A market's currency. Shopify markets are per-country, so the country IS the
+ *  answer — and it's deterministic, unlike guessing from whatever the fetcher saw. */
+export function currencyForCountry(country) {
+  return country ? COUNTRY_CURRENCY[String(country).toUpperCase()] : undefined;
+}

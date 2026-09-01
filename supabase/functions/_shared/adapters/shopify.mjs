@@ -4,6 +4,7 @@
 // parseShopifyJs() is pure (no network) so it can be unit-tested with fixtures.
 
 import { httpGet } from "../fetcher.mjs";
+import { currencyForCountry } from "../locale.mjs";
 
 const cents = (n) => (n == null ? undefined : Number(n) / 100);
 
@@ -47,7 +48,16 @@ export async function readShopify(item) {
   // Build the canonical /products/{handle}.js (handles /collections/.../products/ URLs).
   const u = new URL(item.url);
   const handle = (u.pathname.match(/\/products\/([^/]+)/) || [])[1];
-  const jsUrl = handle ? `${u.origin}/products/${handle}.js` : item.url.split("?")[0].replace(/\/+$/, "") + ".js";
+  const base = handle ? `${u.origin}/products/${handle}.js` : item.url.split("?")[0].replace(/\/+$/, "") + ".js";
+
+  // PIN THE MARKET. Shopify serves a different price AND different stock per
+  // market, and `.js` honours ?country=. Measured on mutimer.co, one variant,
+  // one moment: no hint -> 380.00 out of stock; ?country=GB -> 240.00 IN STOCK;
+  // ?country=SG -> 418.00 out of stock. Without the hint the answer is whatever
+  // geography the checker happens to run in — which is nobody's storefront.
+  const market = item.market ? String(item.market).toUpperCase() : undefined;
+  const jsUrl = market ? `${base}?country=${encodeURIComponent(market)}` : base;
+
   const r = await httpGet(jsUrl, { headers: { accept: "application/json" } });
   if (!r.ok) {
     const kind = r.status === 403 ? "blocked" : r.error === "timeout" ? "timeout" : "http";
@@ -59,9 +69,15 @@ export async function readShopify(item) {
   } catch {
     return { ok: false, kind: "parse", message: "shopify .js did not return JSON", checkedAt };
   }
-  // Auto-detect the shop's BASE currency (geo-stable) when not pinned in config —
-  // the .js omits currency, and page JSON-LD can be geo-localized by Shopify Markets.
-  let currency = item.currency;
+  // CURRENCY MUST COME FROM THE SAME MARKET AS THE PRICE.
+  //
+  // This used to read the shop's BASE currency from /meta.json regardless of
+  // which market the price came from — so an SGD number could be printed with a
+  // EUR label, which is the one failure this project refuses: a real number
+  // wearing the wrong denomination. When the market is pinned, its currency is
+  // the market's. /meta.json is only the fallback for unpinned rows, where the
+  // price really is the shop's default.
+  let currency = item.currency ?? (market ? currencyForCountry(market) : undefined);
   if (!currency) {
     const meta = await httpGet(`${u.origin}/meta.json`, { headers: { accept: "application/json" } });
     try { currency = JSON.parse(meta.body).currency; } catch { /* leave undefined */ }
