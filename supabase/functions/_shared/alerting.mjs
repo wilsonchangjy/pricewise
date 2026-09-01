@@ -4,6 +4,7 @@
 //  prev reading?            transition checked            dedup rule
 //  ------------             ------------------            -----------------------
 //  none      -> baseline (info only, no alert)        set lastAlertPrice/Status
+//  currency changed -> "market changed" (info only)   re-baseline price+status
 //  in -> out -> "sold out"                            lastAlertStatus = oos
 //  out -> in -> "back in stock"                       lastAlertStatus = in_stock
 //  sizes low -> "running low" (best-effort)           lastAlertStatus = low
@@ -102,6 +103,60 @@ export function evaluate(item, prev, reading) {
     return { events, patch };
   }
 
+  // --- The units changed: this series is no longer comparable. ---
+  //
+  // A price is a number AND a currency, but lastAlertPrice banks only the
+  // number. When a shop starts quoting a different currency — which is exactly
+  // what pinning an item to a different Shopify market does — comparing the old
+  // number to the new one manufactures a percentage out of nothing.
+  //
+  // LIVE DAMAGE, 2026-09-01. Pinning two items to the SG market flipped their
+  // readings from AUD and EUR to SGD, and this function sent:
+  //   "📈 PRICE UP:   Funnel Neck Blouson — S   SGD 380.00 -> SGD 418.00 (+10%)"
+  //   "💸 PRICE DROP: Octubre ring — 12         SGD 398.00 -> SGD 362.00 (9% off)"
+  // Neither price had moved at all. The 380 was AUD, the 398 was EUR, and both
+  // were printed wearing SGD's label because the OLD number was formatted with
+  // the NEW reading's currency. Two confident wrong numbers, which is the one
+  // thing this tracker must never produce.
+  //
+  // Stock is re-baselined too, not just price. On a Shopify market switch
+  // availability changes with the storefront (mutimer size S: sold out in SG,
+  // in stock in GB), so letting "BACK IN STOCK" through here would be the same
+  // lie in a different field — nothing came back, we just looked elsewhere.
+  //
+  // Only a change between two KNOWN currencies counts. Base44 shops publish no
+  // currency at all and carry "" forever; treating unknown as a change would
+  // re-baseline them on every single check. That is the same rule comparePrices()
+  // applies in verify.mjs — one currency question, one answer, in both places.
+  const prevCurrency = prev.lastAlertCurrency ?? prev.lastReading.currency ?? "";
+  const nowCurrency = reading.currency ?? "";
+  if (prevCurrency && nowCurrency && prevCurrency !== nowCurrency) {
+    events.push({
+      kind: "market_change",
+      level: "info",
+      text:
+        `🌐 MARKET CHANGED: ${item.label}\n` +
+        `This shop is quoting ${nowCurrency} now, where it was quoting ${prevCurrency}. ` +
+        `The old price isn't comparable to the new one, so I've reset the starting ` +
+        `point rather than invent a change.\n` +
+        `Right now: ${fmt(price, nowCurrency)}` + (available ? "" : " — OUT OF STOCK") +
+        (item.targetPrice != null
+          ? `\nYour target of ${fmt(item.targetPrice, prevCurrency)} was set while I was ` +
+            `reading ${prevCurrency} — worth re-checking.`
+          : ""),
+    });
+    patch.lastAlertPrice = price;
+    patch.lastAlertCurrency = nowCurrency;
+    patch.lastAlertStatus = available ? "in_stock" : "oos";
+    return { events, patch };
+  }
+
+  // Past the guard, prevCurrency either equals nowCurrency or is unknown. Format
+  // a REMEMBERED price with the currency we remembered it in — never with the
+  // one we happen to be reading today. Falling back to nowCurrency only when we
+  // never recorded one keeps pre-existing rows reading exactly as before.
+  const oldCurrency = prevCurrency || nowCurrency;
+
   const prevStatus = prev.lastAlertStatus ?? (prev.lastReading.available ? "in_stock" : "oos");
 
   // --- Availability transitions ---
@@ -163,15 +218,17 @@ export function evaluate(item, prev, reading) {
         text: `🎯 TARGET HIT: ${item.label}\n${fmt(price, reading.currency)} (<= your ${fmt(item.targetPrice, reading.currency)})\n${item.url}`,
       });
       patch.lastAlertPrice = price;
+      patch.lastAlertCurrency = nowCurrency;
     } else if (price < lastAlertPrice) {
       if (isDropWorthAlerting(lastAlertPrice, price)) {
         const off = Math.round((1 - price / lastAlertPrice) * 100);
         events.push({
           kind: "price_drop",
           level: "alert",
-          text: `💸 PRICE DROP: ${item.label}\n${fmt(lastAlertPrice, reading.currency)} -> ${fmt(price, reading.currency)} (${off}% off)\n${item.url}`,
+          text: `💸 PRICE DROP: ${item.label}\n${fmt(lastAlertPrice, oldCurrency)} -> ${fmt(price, reading.currency)} (${off}% off)\n${item.url}`,
         });
         patch.lastAlertPrice = price;
+        patch.lastAlertCurrency = nowCurrency;
       }
       // Too small to shout about — and CRUCIALLY we leave lastAlertPrice alone.
       // Banking the new number would reset the yardstick every time, so 65 -> 64
@@ -187,10 +244,11 @@ export function evaluate(item, prev, reading) {
         events.push({
           kind: "price_up",
           level: "alert",
-          text: `📈 PRICE UP: ${item.label}\n${fmt(lastAlertPrice, reading.currency)} -> ${fmt(price, reading.currency)} (+${upPct}%)\n${item.url}`,
+          text: `📈 PRICE UP: ${item.label}\n${fmt(lastAlertPrice, oldCurrency)} -> ${fmt(price, reading.currency)} (+${upPct}%)\n${item.url}`,
         });
       }
       patch.lastAlertPrice = price; // raise the baseline either way
+      patch.lastAlertCurrency = nowCurrency;
     }
     // price === lastAlertPrice -> flat, no alert, no change (kills repeat spam).
   }

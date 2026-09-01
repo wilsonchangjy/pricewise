@@ -277,6 +277,7 @@ async function alertSubscriber(sub, product, prevReading, reading, priceTrusted 
     ? {
         lastReading: prevReading ?? reading,
         lastAlertPrice: sub.last_alert_price != null ? Number(sub.last_alert_price) : undefined,
+        lastAlertCurrency: sub.last_alert_currency ?? undefined,
         lastAlertStatus: sub.last_alert_status,
       }
     : null;
@@ -289,6 +290,11 @@ async function alertSubscriber(sub, product, prevReading, reading, priceTrusted 
   if (!priceTrusted) {
     events = events.filter((e) => e.kind !== "price_drop" && e.kind !== "target_hit" && e.kind !== "price_up");
     delete patch.lastAlertPrice; // don't bank a number we don't believe
+    // The currency travels WITH the price it labels. Banking one without the
+    // other leaves last_alert_price in the old currency while last_alert_currency
+    // claims the new one — which is precisely the mismatch the guard in
+    // alerting.mjs exists to detect, silently made undetectable.
+    delete patch.lastAlertCurrency;
   }
 
   // A drop alert asks a silent question: "is this actually a good price?" We can
@@ -342,6 +348,7 @@ async function alertSubscriber(sub, product, prevReading, reading, priceTrusted 
 
   const update = {};
   if ("lastAlertPrice" in patch) update.last_alert_price = patch.lastAlertPrice ?? null;
+  if ("lastAlertCurrency" in patch) update.last_alert_currency = patch.lastAlertCurrency ?? null;
   if ("lastAlertStatus" in patch) update.last_alert_status = patch.lastAlertStatus;
   if (Object.keys(update).length) await db.from("subscriptions").update(update).eq("id", sub.id);
 

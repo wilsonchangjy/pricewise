@@ -82,3 +82,77 @@ test("the bar is max(5%, 2) — both must clear", () => {
   assert.equal(isDropWorthAlerting(65, 70), false);      // not a drop
   assert.equal(isDropWorthAlerting(0, 0), false);        // no baseline to measure from
 });
+
+// ── a market switch is not a price move ─────────────────────────────────────
+// REGRESSION, from live damage on 2026-09-01. Pinning two items to the SG
+// Shopify market flipped their readings from AUD and EUR to SGD, and evaluate()
+// sent two movements that had never happened — printing the OLD number wearing
+// the NEW currency's label:
+//   "PRICE UP:   Funnel Neck Blouson — S   SGD 380.00 -> SGD 418.00 (+10%)"
+//   "PRICE DROP: Octubre ring — 12         SGD 398.00 -> SGD 362.00 (9% off)"
+
+const inCur = (price, currency, available = true) => ({
+  ok: true, price, currency, available,
+  variants: [{ id: "S", label: "S", price, available, state: available ? STATE.IN_STOCK : STATE.OUT_OF_STOCK }],
+});
+const banked = (price, currency, status = "in_stock") => ({
+  lastReading: { available: true, price, currency },
+  lastAlertStatus: status,
+  lastAlertPrice: price,
+  lastAlertCurrency: currency,
+});
+
+test("the live 380 AUD -> 418 SGD sent a +10% rise that never happened", () => {
+  const { events, patch } = evaluate(item, banked(380, "AUD"), inCur(418, "SGD"));
+  assert.equal(events.filter((e) => e.kind === "price_up").length, 0, "nothing rose — only the storefront changed");
+  const [m] = events.filter((e) => e.kind === "market_change");
+  assert.ok(m, "the user is told why the number moved");
+  assert.equal(m.level, "info", "a re-baseline is not an alert");
+  assert.match(m.text, /SGD .*where it was quoting AUD|quoting SGD now, where it was quoting AUD/);
+  assert.equal(patch.lastAlertPrice, 418);
+  assert.equal(patch.lastAlertCurrency, "SGD", "bank the currency with the price, or this repeats forever");
+});
+
+test("the live 398 EUR -> 362 SGD sent a 9% drop that never happened", () => {
+  const { events } = evaluate(item, banked(398, "EUR"), inCur(362, "SGD"));
+  assert.equal(events.filter((e) => e.kind === "price_drop").length, 0);
+  assert.equal(events.filter((e) => e.kind === "market_change").length, 1);
+});
+
+test("a market switch re-baselines STOCK too, so nothing 'comes back' that never left", () => {
+  // mutimer size S is genuinely sold out in SG and in stock in GB. Letting a
+  // restock through on the switch would be the same lie in a different field.
+  const { events, patch } = evaluate(item, banked(418, "SGD", "oos"), inCur(240, "GBP", true));
+  assert.equal(events.filter((e) => e.kind === "restock").length, 0);
+  assert.equal(patch.lastAlertStatus, "in_stock", "but the new state IS banked, so the next real move alerts");
+});
+
+test("a target set in the old currency is flagged, not silently re-applied", () => {
+  const withTarget = { ...item, targetPrice: 300 };
+  const [m] = evaluate(withTarget, banked(380, "AUD"), inCur(418, "SGD"))
+    .events.filter((e) => e.kind === "market_change");
+  assert.match(m.text, /target of AUD 300\.00 was set while I was reading AUD/);
+  assert.equal(evaluate(withTarget, banked(380, "AUD"), inCur(418, "SGD"))
+    .events.filter((e) => e.kind === "target_hit").length, 0);
+});
+
+test("an UNKNOWN currency is not a change — Base44 shops publish none at all", () => {
+  // These carry "" forever. Treating unknown as a change would re-baseline them
+  // on every single check and they'd never alert on price again.
+  const { events, patch } = evaluate(item, banked(100, ""), inCur(80, ""));
+  assert.equal(events.filter((e) => e.kind === "market_change").length, 0);
+  assert.equal(events.filter((e) => e.kind === "price_drop").length, 1, "a real 20% drop still lands");
+  assert.equal(patch.lastAlertPrice, 80);
+});
+
+test("a pre-0013 row with no banked currency keeps behaving exactly as before", () => {
+  const legacy = { lastReading: { available: true, price: 65, currency: "EUR" }, lastAlertStatus: "in_stock", lastAlertPrice: 65 };
+  const { events } = evaluate(item, legacy, inCur(61.75, "EUR"));
+  assert.equal(events.filter((e) => e.kind === "price_drop").length, 1);
+  assert.equal(events.filter((e) => e.kind === "market_change").length, 0);
+});
+
+test("same currency: a remembered price is printed in the currency it was remembered in", () => {
+  const [d] = evaluate(item, banked(65, "EUR"), inCur(61.75, "EUR")).events.filter((e) => e.kind === "price_drop");
+  assert.match(d.text, /EUR 65\.00 -> EUR 61\.75/);
+});

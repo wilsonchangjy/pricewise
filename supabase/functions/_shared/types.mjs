@@ -65,6 +65,8 @@
  * @typedef {Object} ItemState
  * @property {Reading} [lastReading]
  * @property {number}  [lastAlertPrice]   Dedup: last price we alerted at.
+ * @property {string}  [lastAlertCurrency] The currency lastAlertPrice was read in.
+ *                                        Without it a market switch reads as a price move.
  * @property {string}  [lastAlertStatus]  "in_stock" | "oos" | "low".
  * @property {number}  [lastVariantCount] Soft-failure shape check.
  * @property {number}  consecutiveFailures
@@ -75,7 +77,7 @@
 
 /**
  * @typedef {Object} AlertEvent
- * @property {"baseline"|"price_drop"|"price_up"|"restock"|"oos"|"low_stock"|"target_hit"} kind
+ * @property {"baseline"|"price_drop"|"price_up"|"restock"|"oos"|"low_stock"|"target_hit"|"market_change"} kind
  * @property {"info"|"alert"} level
  * @property {string} text
  */
