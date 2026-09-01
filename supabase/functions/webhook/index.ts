@@ -692,7 +692,15 @@ async function runSearch(user, chatId, query, token) {
     // asking the same thing — free. The pages are still read fresh every time.
     cache: {
       get: async (key, c) => (await db.rpc("get_cached_search", { p_query: key, p_country: c ?? "" })).data,
-      put: (key, c, urls) => db.rpc("put_cached_search", { p_query: key, p_country: c ?? "", p_urls: urls }),
+      // async, so this returns a real Promise rather than a PostgREST builder.
+      // A builder is a thenable without .catch(), and handing one to a caller
+      // that reasonably expects a Promise is what broke every search that
+      // found something. Awaiting here also turns a Postgres error into a
+      // rejection instead of a quietly-resolved { error } nobody inspects.
+      put: async (key, c, urls) => {
+        const { error } = await db.rpc("put_cached_search", { p_query: key, p_country: c ?? "", p_urls: urls });
+        if (error) throw error;
+      },
     },
   });
 

@@ -396,6 +396,55 @@ test("an empty result is never cached", async () => {
   } finally { globalThis.fetch = real; }
 });
 
+// ── the cache must never be able to fail a search ───────────────────────────
+// REGRESSION. Every test above stubs `put: async () => {}`, a real Promise, and
+// that is precisely why the suite stayed green while the live bot threw on every
+// search that found anything: the webhook's put() returned a supabase-js
+// PostgREST builder, a THENABLE with .then() but no .catch(). `put(...).catch()`
+// blew up synchronously, and the `ranked.length` guard meant it only ever blew
+// up on searches that had SUCCEEDED. So these two stub the shapes a real caller
+// actually returns, not the convenient one.
+
+test("a cache whose put() is a thenable (not a Promise) still returns results", async () => {
+  const { findProduct } = await import("../supabase/functions/_shared/search.mjs");
+  const page = JSON.stringify({ title: "Found", price: 100, variants: [{ id: 1, title: "M", available: true, price: 100 }] });
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u) => (String(u).includes(".js")
+    ? { ok: true, status: 200, url: String(u), headers: new Headers(), text: async () => page }
+    : { ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" });
+  try {
+    let wrote = 0;
+    // Exactly the shape supabase-js hands back: awaitable, but no .catch().
+    const builder = () => { wrote++; return { then: (res) => { res({ error: null }); return undefined; } }; };
+    const out = await findProduct("thenable shop", {
+      sources: [async () => ([{ url: "https://shop.test/products/x", hint: "" }])],
+      cache: { get: async () => null, put: builder },
+    });
+    assert.equal(wrote, 1, "the write is attempted");
+    assert.equal(out.length, 1, "and the results survive it");
+  } finally { globalThis.fetch = real; }
+});
+
+test("a cache that throws outright still returns results", async () => {
+  const { findProduct } = await import("../supabase/functions/_shared/search.mjs");
+  const page = JSON.stringify({ title: "Found", price: 100, variants: [{ id: 1, title: "M", available: true, price: 100 }] });
+  const real = globalThis.fetch;
+  const warn = console.warn;
+  globalThis.fetch = async (u) => (String(u).includes(".js")
+    ? { ok: true, status: 200, url: String(u), headers: new Headers(), text: async () => page }
+    : { ok: false, status: 404, url: String(u), headers: new Headers(), text: async () => "" });
+  let warned = 0;
+  console.warn = () => { warned++; };
+  try {
+    const out = await findProduct("exploding cache", {
+      sources: [async () => ([{ url: "https://shop.test/products/x", hint: "" }])],
+      cache: { get: async () => null, put: () => { throw new Error("relation does not exist"); } },
+    });
+    assert.equal(out.length, 1, "a cache is an optimisation; it cannot be allowed to fail the search");
+    assert.equal(warned, 1, "but it must say so — silence is how this ran for weeks");
+  } finally { globalThis.fetch = real; console.warn = warn; }
+});
+
 // ── one bad candidate must not sink the search ──────────────────────────────
 // Promise.all rejects the instant any entry does, so an unguarded throw in the
 // per-candidate work took down every OTHER candidate with it. Because a model

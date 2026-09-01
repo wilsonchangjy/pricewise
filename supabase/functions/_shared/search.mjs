@@ -450,11 +450,34 @@ export async function findProduct(query, ctx = {}) {
   // Caching an empty result would turn one bad day at a retailer into a week of
   // "I couldn't find it" for everybody.
   if (ctx.cache && ranked.length) {
-    await ctx.cache.put(
-      cacheKeyFor(query),
-      ctx.country,
-      ranked.map((c) => ({ url: c.url, hint: c.hint ?? "" })),
-    ).catch(() => { /* a cache that won't write is not a failed search */ });
+    // try/catch, NOT `.catch()` on the returned value.
+    //
+    // This line took down every successful search for weeks. The webhook's
+    // put() handed back a supabase-js PostgREST builder, which is a THENABLE —
+    // it has .then(), so `await` works fine — but it has no .catch(). Calling
+    // .catch() on it threw a TypeError synchronously, before the await, so the
+    // "a cache that won't write is not a failed search" intent was defeated by
+    // the very expression meant to express it.
+    //
+    // The `ranked.length` guard above made it perverse: a search that found
+    // NOTHING skipped this block and reported honestly, while a search that
+    // found something died on its last line. The feature failed if and only if
+    // it worked, which is why it read as random.
+    //
+    // Every test stubbed `put: async () => {}` — a real Promise — so the suite
+    // was green throughout. Don't assume a collaborator's promise-shaped return
+    // is a Promise; await it inside a try.
+    try {
+      await ctx.cache.put(
+        cacheKeyFor(query),
+        ctx.country,
+        ranked.map((c) => ({ url: c.url, hint: c.hint ?? "" })),
+      );
+    } catch (e) {
+      // Say so. Silence is what let this run for weeks: the only symptom was a
+      // cache that stayed empty, and nobody reads an empty table.
+      console.warn("search cache write failed (results still delivered):", e);
+    }
   }
   return ranked;
 }
