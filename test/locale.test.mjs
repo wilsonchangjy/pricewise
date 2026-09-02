@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { localeFromUrl, currencyForCountry, isKnownCountry, MARKET_CHOICES }
+import { localeFromUrl, currencyForCountry, isKnownCountry, MARKET_CHOICES, knownCountries }
   from "../supabase/functions/_shared/locale.mjs";
 
 // PRECEDENCE, which is the whole point of the market layers:
@@ -38,4 +38,26 @@ test("typed input is checked against the same map the buttons use", () => {
   assert.ok(!isKnownCountry("ZZ"));
   assert.ok(!isKnownCountry(""));
   assert.ok(!isKnownCountry(undefined));
+});
+
+// ── the shortlist is a shortlist, not the limit ─────────────────────────────
+// Shipped with eight buttons and no mention that a code could be typed, which
+// made eight look like the whole world — Wilson asked whether TR/MY/KR were
+// simply unsupported. MY and KR always were; TR was not, and that was a fact
+// about our map rather than about any shop.
+
+test("the typed path reaches far beyond the eight buttons", () => {
+  const all = knownCountries();
+  assert.ok(all.length > 60, `only ${all.length} markets`);
+  for (const cc of ["TR", "MY", "KR", "PL", "BR", "ZA", "IL", "VN", "MX", "SA"]) {
+    assert.ok(isKnownCountry(cc), `${cc} should be priceable`);
+  }
+});
+
+test("every button is also reachable by typing — one map behind both", () => {
+  for (const [cc] of MARKET_CHOICES) assert.ok(knownCountries().includes(cc), cc);
+});
+
+test("no market is listed without a currency to print it in", () => {
+  for (const cc of knownCountries()) assert.match(currencyForCountry(cc), /^[A-Z]{3}$/, cc);
 });

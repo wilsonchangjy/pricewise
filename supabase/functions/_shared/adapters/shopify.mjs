@@ -84,3 +84,48 @@ export async function readShopify(item) {
   }
   return parseShopifyJs(data, currency ? { ...item, currency } : item);
 }
+
+/**
+ * Does this shop actually PRICE in the market we're about to pin, and in what?
+ *
+ * FOUND BY PROBING, and it is the difference between a right number and a
+ * ruinous one. A Shopify shop silently serves its HOME market to any country it
+ * has no market for — same URL, no error, no signal in the .js payload:
+ *
+ *   mutimer.co ?country=SG -> 417.00 SGD   (a real market)
+ *   mutimer.co ?country=KR -> 447000 KRW   (a real market)
+ *   mutimer.co ?country=IN -> 380.00 AUD   (NO market — the AU price, unchanged)
+ *   mutimer.co ?country=NO -> 345.45 AUD   (NO market — a converted display price)
+ *
+ * currencyForCountry() would have labelled those last two INR and NOK. "INR 380"
+ * for a jacket costing 380 AUD is off by about 25x, and it is exactly the kind
+ * of confident wrong number this project exists not to produce.
+ *
+ * /meta.json cannot answer: it returns the shop's BASE currency whatever
+ * ?country= says (verified — AUD for both SG and IN). ships_to_countries cannot
+ * either: Norway ships and is still priced in AUD, so shipping is not a market.
+ * The page's own priceCurrency is the only authoritative signal, so we ask it.
+ *
+ * Called at PIN time only — once when a market is chosen, never per check.
+ *
+ * @returns {Promise<{ currency?: string, honoured?: boolean }>}
+ *   `honoured` false means the shop has no market there and served its own.
+ *   An unreachable shop returns {} — unknown, and the caller must not guess.
+ */
+export async function probeMarketCurrency(url, market) {
+  const cc = market ? String(market).toUpperCase() : "";
+  if (!cc) return {};
+  const expected = currencyForCountry(cc);
+  try {
+    const u = new URL(url);
+    u.searchParams.set("country", cc);
+    const r = await httpGet(u.toString(), { headers: { accept: "text/html" } });
+    if (!r.ok) return {};
+    const m = String(r.body).match(/"priceCurrency"\s*:\s*"([A-Z]{3})"/);
+    if (!m) return {};
+    const currency = m[1];
+    return { currency, honoured: Boolean(expected) && currency === expected };
+  } catch {
+    return {};
+  }
+}

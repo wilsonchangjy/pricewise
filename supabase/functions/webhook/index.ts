@@ -11,7 +11,7 @@ import { planAdd, MAX_DEFENDED, MAX_ITEMS, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, F
 import { detectAdapter } from "../_shared/router.mjs";
 import { sendMessage, deleteMessage, editMessage, answerCallback } from "../_shared/telegram.mjs";
 import { labelFromUrl } from "../_shared/label.mjs";
-import { localeFromUrl, currencyForCountry, MARKET_CHOICES, isKnownCountry } from "../_shared/locale.mjs";
+import { localeFromUrl, currencyForCountry, MARKET_CHOICES, isKnownCountry, knownCountries } from "../_shared/locale.mjs";
 import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
 import { cleanUrl } from "../_shared/urlguard.mjs";
 import { expandUrl, isShortLink } from "../_shared/expand.mjs";
@@ -26,6 +26,7 @@ import {
   confirmRemoveKeyboard, backToItemKeyboard, targetKeyboard, prefsKeyboard,
   setEveryIntervalKeyboard, setEveryScopeKeyboard, prefsSizeCategoryKeyboard,
   colourKeyboard, variantColours, candidateKeyboard, marketKeyboard, prefsCountryKeyboard } from "../_shared/keyboards.mjs";
+import { probeMarketCurrency } from "../_shared/adapters/shopify.mjs";
 import { findProduct, looksBroad, MAX_CANDIDATES } from "../_shared/search.mjs";
 import { AI_PROVIDERS, detectAiProvider } from "../_shared/ai.mjs";
 
@@ -307,7 +308,7 @@ async function addItem(user, chatId, rawUrl) {
       .insert({
         url,
         market: market ?? null,
-        currency: market ? currencyForCountry(market) : null,
+        currency: market ? (await resolveMarketCurrency(url, market, plan.adapter)).currency : null,
         adapter: plan.adapter,
         fetch_strategy: plan.strategy,
         title: (await fetchTitle(url)) ?? labelFromUrl(url),
@@ -1386,6 +1387,33 @@ function marketChoicesFor(user) {
   return [...MARKET_CHOICES, [cc, cc]];
 }
 
+
+/**
+ * What currency will this shop ACTUALLY quote if we pin it to that market?
+ *
+ * Never assume currencyForCountry() is the answer. A Shopify shop with no market
+ * for your country serves its home market instead, silently — mutimer.co answers
+ * ?country=IN with 380.00 AUD, and labelling that "INR 380" is wrong by about
+ * 25x. So we ask the shop once, at pin time, and store what it says.
+ *
+ * Returns the currency to store plus a line to show the user when the shop
+ * doesn't have a market where they are. Unknown (shop unreachable) keeps the
+ * expected currency rather than inventing one — the checker's own reading and
+ * the verifier both re-examine it later.
+ */
+async function resolveMarketCurrency(url, market, adapter) {
+  const expected = currencyForCountry(market);
+  if (adapter !== "shopify") return { currency: expected ?? null, note: null };
+  const probe = await probeMarketCurrency(url, market);
+  if (!probe.currency) return { currency: expected ?? null, note: null };
+  if (probe.honoured) return { currency: probe.currency, note: null };
+  return {
+    currency: probe.currency,
+    note: `This shop has no ${market} storefront — it serves ${probe.currency} to shoppers there, `
+        + `so that's what I'll track. The price is real; it just isn't in ${expected ?? "your currency"}.`,
+  };
+}
+
 /** The row for this URL at that market, created if nobody watches it yet. */
 async function productForMarket(from, market) {
   const { data: existing } = await db.from("tracked_products").select("*")
@@ -1401,10 +1429,11 @@ async function productForMarket(from, market) {
     }
     return existing;
   }
+  const resolved = await resolveMarketCurrency(from.url, market, from.adapter);
   const { data, error } = await db.from("tracked_products").insert({
     url: from.url,
     market,
-    currency: currencyForCountry(market) ?? null,
+    currency: resolved.currency,
     adapter: from.adapter,
     fetch_strategy: from.fetch_strategy,
     title: from.title,
@@ -1413,6 +1442,7 @@ async function productForMarket(from, market) {
     next_check_at: new Date().toISOString(),
   }).select("*").single();
   if (error) throw error;
+  data.marketNote = resolved.note;   // surfaced once, by the caller that pinned it
   return data;
 }
 
@@ -1450,6 +1480,13 @@ const marketNote = [
   "again rather than compare two currencies as though they were one.",
 ].join("\n");
 
+// THE BUTTONS ARE A SHORTLIST, NOT THE LIMIT. Shipping eight of them without
+// ever saying so made eight look like the whole world — which is how someone in
+// Türkiye or Malaysia concludes the feature isn't for them. Every message that
+// shows the shortlist says this.
+const TYPE_ANY = (usage) =>
+  `Not listed? Type ${usage} with any two-letter country code — I know ${knownCountries().length} of them.`;
+
 async function renderMarkets(user, sub, chatId, messageId, cqId) {
   if (cqId) await answerCallback(BOT_TOKEN, cqId);
   const p = sub.tracked_products;
@@ -1461,6 +1498,8 @@ async function renderMarkets(user, sub, chatId, messageId, cqId) {
       : "Right now: whichever the shop serves me — not pinned to one.",
     "",
     marketNote,
+    "",
+    TYPE_ANY("/market <number> <code>"),
   ].join("\n"), { keyboard: marketKeyboard(sub.id, p.market, marketChoicesFor(user)) });
 }
 
@@ -1473,8 +1512,11 @@ async function applyMarket(user, sub, chatId, messageId, cqId, cc) {
     await answerCallback(BOT_TOKEN, cqId, `Already on ${market}.`);
     return renderItem(sub, chatId, messageId);
   }
-  await moveToMarket(sub, market);
+  const moved = await moveToMarket(sub, market);
   await answerCallback(BOT_TOKEN, cqId, `Now watching the ${market} storefront`);
+  // A shop with no market where you are serves its own, silently. Say so rather
+  // than quietly tracking a number in a currency the user didn't ask for.
+  if (moved.marketNote) await reply(chatId, `🌐 ${moved.marketNote}`);
   return renderItem(sub, chatId, messageId);
 }
 
@@ -1483,7 +1525,12 @@ async function applyMarket(user, sub, chatId, messageId, cqId, cc) {
 async function setMarket(user, chatId, ref, cc) {
   const market = String(cc ?? "").toUpperCase();
   if (!isKnownCountry(market)) {
-    return reply(chatId, `I don't know how to price “${cc}”. Try one of: ${MARKET_CHOICES.map(([c]) => c).join(", ")} — or open /list and tap 🌐 Market.`);
+    return reply(chatId, [
+      `I don't know how to price “${cc}” — I can't name its currency, and I won't print a number without one.`,
+      "",
+      `I do know these ${knownCountries().length}:`,
+      knownCountries().join(" "),
+    ].join("\n"));
   }
   const subs = await subscriptionList(user.id);
   const n = Number(ref);
@@ -1498,6 +1545,7 @@ async function setMarket(user, chatId, ref, cc) {
   const target = await moveToMarket(sub, market);
   return reply(chatId, [
     `🌐 ${p.title} is now watched on the ${market} storefront${target.currency ? ` (${target.currency})` : ""}.`,
+    ...(target.marketNote ? ["", target.marketNote] : []),
     "",
     marketNote,
   ].join("\n"));
@@ -1520,6 +1568,8 @@ async function showPrefsCountry(user, chatId, messageId, cqId) {
     "",
     "This is the default for items you add from here on. A link that already names",
     "a country keeps its own, and anything you've pinned by hand stays pinned.",
+    "",
+    TYPE_ANY("/setcountry <code>"),
   ].join("\n"), { keyboard: prefsCountryKeyboard(current, marketChoicesFor(user)) });
 }
 
@@ -1542,7 +1592,12 @@ async function applyDefaultCountry(user, chatId, messageId, cqId, cc) {
 async function setDefaultCountry(user, chatId, cc) {
   const market = String(cc ?? "").toUpperCase();
   if (!isKnownCountry(market)) {
-    return reply(chatId, `I don't know how to price “${cc}”. Try one of: ${MARKET_CHOICES.map(([c]) => c).join(", ")}.`);
+    return reply(chatId, [
+      `I don't know how to price “${cc}” — I can't name its currency, and I won't print a number without one.`,
+      "",
+      `I do know these ${knownCountries().length}:`,
+      knownCountries().join(" "),
+    ].join("\n"));
   }
   await saveCountry(user, market);
   return reply(chatId, `🌐 Noted — you shop from ${market}. That's the default for new items; anything already on your list keeps the storefront it's on (open /list and tap 🌐 Market to move one).`);

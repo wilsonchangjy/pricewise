@@ -13,6 +13,16 @@ const COUNTRY_CURRENCY = {
   DK: "DKK", NO: "NOK", AE: "AED", TW: "TWD", TH: "THB", ID: "IDR", PH: "PHP",
   IN: "INR", DE: "EUR", FR: "EUR", ES: "EUR", IT: "EUR", NL: "EUR", IE: "EUR",
   AT: "EUR", BE: "EUR", PT: "EUR", FI: "EUR",
+  // Added because the list was quietly the limit of who could use the feature:
+  // someone in Türkiye or Poland was told "I don't know how to price that",
+  // which is a sentence about our map, not about their shop.
+  TR: "TRY", PL: "PLN", CZ: "CZK", HU: "HUF", RO: "RON", BG: "BGN", HR: "EUR",
+  GR: "EUR", SK: "EUR", SI: "EUR", LT: "EUR", LV: "EUR", EE: "EUR", LU: "EUR",
+  CY: "EUR", MT: "EUR", IS: "ISK", IL: "ILS", SA: "SAR", QA: "QAR", KW: "KWD",
+  BH: "BHD", OM: "OMR", EG: "EGP", ZA: "ZAR", NG: "NGN", KE: "KES", MA: "MAD",
+  BR: "BRL", MX: "MXN", AR: "ARS", CL: "CLP", CO: "COP", PE: "PEN", UY: "UYU",
+  VN: "VND", PK: "PKR", BD: "BDT", LK: "LKR", KH: "KHR", MO: "MOP", BN: "BND",
+  UA: "UAH", RS: "RSD", MK: "MKD", AZ: "AZN", GE: "GEL", KZ: "KZT",
 };
 
 /**
@@ -43,12 +53,15 @@ export function currencyForCountry(country) {
 }
 
 /**
- * The markets we offer as buttons. Not every country we can price — just the
+ * The markets we offer as BUTTONS. Not every country we can price — just the
  * ones worth two taps, ordered so the common ones come first.
  *
- * Deliberately short. A market picker listing 40 countries is a worse answer
- * than one listing eight and letting the rest be typed, because the point of
- * the button is to avoid typing at all.
+ * Deliberately short: a picker listing eighty countries is a worse answer than
+ * one listing eight, because the point of a button is to avoid typing. But
+ * "short" only works if the OTHER path is visible — the shortlist was shipped
+ * without ever telling anyone they could type a code instead, which made eight
+ * buttons look like the whole world. Every message that shows these now says so.
+ * See countryList() for what the typed path accepts.
  */
 export const MARKET_CHOICES = [
   ["SG", "🇸🇬 Singapore"], ["GB", "🇬🇧 UK"], ["US", "🇺🇸 US"], ["AU", "🇦🇺 Australia"],
@@ -58,4 +71,9 @@ export const MARKET_CHOICES = [
 /** Do we know how to price this market? Guards typed input. */
 export function isKnownCountry(cc) {
   return Boolean(cc && COUNTRY_CURRENCY[String(cc).toUpperCase()]);
+}
+
+/** Every market we can name a currency for — what the typed path accepts. */
+export function knownCountries() {
+  return Object.keys(COUNTRY_CURRENCY).sort();
 }
