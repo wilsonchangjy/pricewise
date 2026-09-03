@@ -38,14 +38,20 @@ export function listKeyboard(subs) {
 
 /** The per-item action menu. The Size button is hidden for items with a single
  *  option (one size, one variant) — there'd be nothing to pick. */
-export function itemKeyboard(subId, { showSize = true } = {}) {
+export function itemKeyboard(subId, { showSize = true, showMarket = true } = {}) {
   const row1 = showSize
     ? [btn("📏 Size", `s:${subId}`), btn("⏱ Every", `e:${subId}`)]
     : [btn("⏱ Every", `e:${subId}`)];
+  // Market is hidden where a pin can't change what we read — a link that names
+  // its own storefront (uniqlo.com/sg/en) or a shop that doesn't take ?country=.
+  // Offering it there would be a control that controls nothing, and worse, one
+  // that writes a currency label onto a price it can't move.
+  const row2 = [btn("🎯 Price", `t:${subId}`), btn("📈 History", `h:${subId}`)];
+  if (showMarket) row2.push(btn("🌐 Market", `m:${subId}`));
   return {
     inline_keyboard: [
       row1,
-      [btn("🎯 Price", `t:${subId}`), btn("📈 History", `h:${subId}`), btn("🌐 Market", `m:${subId}`)],
+      row2,
       [btn("🗑 Remove", `r:${subId}`), btn("◀︎ Back", "L")],
     ],
   };

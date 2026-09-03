@@ -10,7 +10,7 @@ import { parseCommand } from "../_shared/commands.mjs";
 import { planAdd, MAX_DEFENDED, MAX_ITEMS, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, FREE_INTERVAL_MIN, DEFENDED_INTERVAL_MIN, ADAPTER_TIER, TIER_INTERVAL_MIN, monthlyCredits } from "../_shared/policy.mjs";
 import { detectAdapter } from "../_shared/router.mjs";
 import { sendMessage, deleteMessage, editMessage, answerCallback } from "../_shared/telegram.mjs";
-import { labelFromUrl } from "../_shared/label.mjs";
+import { labelFromUrl, displayTitle } from "../_shared/label.mjs";
 import { localeFromUrl, currencyForCountry, MARKET_CHOICES, isKnownCountry, knownCountries } from "../_shared/locale.mjs";
 import { resolveSelector, resolveFromPage, fetchTitle } from "../_shared/resolve.mjs";
 import { cleanUrl } from "../_shared/urlguard.mjs";
@@ -360,7 +360,14 @@ async function addItem(user, chatId, rawUrl) {
 async function subscriptionList(userId) {
   const { data } = await db
     .from("subscriptions")
-    .select("id, status, target_price, last_alert_price, tracked_products(id, url, title, fetch_strategy, currency)")
+    // EVERY column a market move needs, not just the ones the list PRINTS.
+    // Omitting adapter/market/variant_selector here is what made 🌐 Market fail:
+    // productForMarket() inserted a row with adapter undefined, adapter is NOT
+    // NULL with no default, and the throw surfaced as "Something went wrong".
+    // It only worked when a row for that (url, market) already existed — which
+    // is exactly why SG succeeded on the two already-pinned items and nothing
+    // else did.
+    .select("id, status, target_price, last_alert_price, tracked_products(id, url, title, adapter, fetch_strategy, currency, market, variant_selector, check_interval_minutes)")
     .eq("user_id", userId)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
@@ -378,7 +385,7 @@ async function listItems(user, chatId) {
     if (s.target_price != null) bits.push(`target ${fmt(Number(s.target_price), p.currency)}`);
     if (s.status === "paused") bits.push("paused");
     if (p.fetch_strategy === "unblocker") bits.push("daily/your key");
-    return `${i + 1}. ${p.title}${bits.length ? `\n   ${bits.join(" · ")}` : ""}\n   ${p.url}`;
+    return `${i + 1}. ${displayTitle(p)}${bits.length ? `\n   ${bits.join(" · ")}` : ""}\n   ${p.url}`;
   });
   return sendMessage(BOT_TOKEN, chatId,
     `Tracking ${subs.length} item${subs.length > 1 ? "s" : ""} — tap a number to change one:\n\n${lines.join("\n\n")}`,
@@ -1226,7 +1233,7 @@ async function handleCallback(cq) {
 async function ownedSub(userId, subId) {
   const { data } = await db
     .from("subscriptions")
-    .select("id, status, target_price, last_alert_price, variant_id, variant_label, interval_minutes, tracked_products(id, url, title, fetch_strategy, currency)")
+    .select("id, status, target_price, last_alert_price, variant_id, variant_label, interval_minutes, tracked_products(id, url, title, adapter, fetch_strategy, currency, market, variant_selector, check_interval_minutes)")
     .eq("id", subId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -1256,19 +1263,24 @@ async function latestVariants(productId) {
 async function renderItem(sub, chatId, messageId, cqId) {
   if (cqId) await answerCallback(BOT_TOKEN, cqId);
   const p = sub.tracked_products;
-  const bits = [
-    sub.variant_label ? `Watching: ${sub.variant_label}` : "Watching: every size",
-    `Checked every ${intervalWord(sub.interval_minutes ?? FREE_INTERVAL_MIN)}`,
-    p.market ? `Storefront: ${p.market}${p.currency ? ` (${p.currency})` : ""}` : null,
-    sub.last_alert_price != null ? `Last seen at ${fmt(Number(sub.last_alert_price), p.currency)}` : null,
-    sub.target_price != null ? `Alerting below ${fmt(Number(sub.target_price), p.currency)}` : null,
-    sub.status === "paused" ? "Currently muted" : null,
-  ].filter(Boolean);
+  // SAME SHAPE AS /list: title, an indented detail line, a blank line, the URL.
+  // The card used to run title and details together and drop the price entirely,
+  // so tapping an item made it look like a different, thinner object than the
+  // one in the list you tapped it from.
+  const bits = [];
+  if (sub.last_alert_price != null) bits.push(`now ${fmt(Number(sub.last_alert_price), p.currency)}`);
+  if (sub.target_price != null) bits.push(`target ${fmt(Number(sub.target_price), p.currency)}`);
+  bits.push(sub.variant_label ? `size ${sub.variant_label}` : "every size");
+  bits.push(`every ${intervalWord(sub.interval_minutes ?? FREE_INTERVAL_MIN)}`);
+  if (p.market) bits.push(`${p.market} storefront`);
+  if (sub.status === "paused") bits.push("paused");
+  if (p.fetch_strategy === "unblocker") bits.push("daily/your key");
 
   // Nothing to pick on a single-option item, so don't offer the Size button.
   const showSize = (await latestVariants(p.id)).length > 1;
-  return editMessage(BOT_TOKEN, chatId, messageId, `${p.title}\n${bits.join("\n")}\n${p.url}`,
-    { keyboard: itemKeyboard(sub.id, { showSize }) });
+  const text = `${displayTitle(p)}\n   ${bits.join(" · ")}\n\n${p.url}`;
+  return editMessage(BOT_TOKEN, chatId, messageId, text,
+    { keyboard: itemKeyboard(sub.id, { showSize, showMarket: marketIsChangeable(p) }) });
 }
 
 /** The point of the whole feature: pick from what the shop ACTUALLY offers.
@@ -1378,6 +1390,25 @@ async function applyEvery(sub, chatId, messageId, cqId, value) {
 // watching two storefronts are watching two different offers and their
 // histories must not mix.
 
+/**
+ * Can a market pin actually change what we READ for this item?
+ *
+ * Only Shopify honours ?country=, and only when the link doesn't already name a
+ * storefront of its own. Everywhere else the market is decided by the URL —
+ * uniqlo.com/sg/en, farfetch.com/sg, castlery.com/sg — and pinning one would
+ * have changed nothing about the fetch while still writing a currency onto the
+ * row. That is a control that doesn't control anything, attached to a label that
+ * could go wrong: moving a uniqlo.com/sg item to "UK" would have stored GBP
+ * against a page that quotes SGD.
+ *
+ * So the button appears where we can honour it, and the typed path explains
+ * itself where we can't. To watch a locale-in-the-URL shop somewhere else, paste
+ * that storefront's link — it's a different page, and saying so is honest.
+ */
+function marketIsChangeable(p) {
+  return p?.adapter === "shopify" && !localeFromUrl(p?.url ?? "").country;
+}
+
 /** The account default, always on the board even when it isn't shortlisted —
  *  otherwise someone shopping from a country we didn't list sees their own
  *  setting nowhere. */
@@ -1428,6 +1459,11 @@ async function productForMarket(from, market) {
       existing.status = "active";
     }
     return existing;
+  }
+  // Belt and braces: adapter is NOT NULL with no default, so a partial row here
+  // is a 500 rather than a message. Fail loudly and locally instead.
+  if (!from?.url || !from?.adapter) {
+    throw new Error(`productForMarket: incomplete product row (url=${from?.url}, adapter=${from?.adapter})`);
   }
   const resolved = await resolveMarketCurrency(from.url, market, from.adapter);
   const { data, error } = await db.from("tracked_products").insert({
@@ -1539,6 +1575,16 @@ async function setMarket(user, chatId, ref, cc) {
   }
   const sub = subs[n - 1];
   const p = sub.tracked_products;
+  if (!marketIsChangeable(p)) {
+    const own = localeFromUrl(p.url).country;
+    return reply(chatId, [
+      `I can't move ${displayTitle(p)} to another storefront.`,
+      "",
+      own
+        ? `Its link already names one (${own}), so the page itself decides the price — pinning a market would change the label without changing what I read. To watch a different storefront, paste that shop's ${market} link and I'll track it alongside this one.`
+        : "This shop doesn't let me switch storefronts by request — the page serves one price and I read that. Pasting the link for the storefront you want works, if the shop has one.",
+    ].join("\n"));
+  }
   if (String(p.market ?? "") === market) {
     return reply(chatId, `${p.title} is already watched on the ${market} storefront.`);
   }

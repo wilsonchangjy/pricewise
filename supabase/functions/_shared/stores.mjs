@@ -107,3 +107,61 @@ export function storesMessage() {
     "Missing one? Send the link anyway — I'll try to read it, and log the request if I can't.",
   ].join("\n");
 }
+
+/**
+ * Display brand for a hostname — the name a shopper would say out loud.
+ *
+ * Used to put the brand in front of a bare product title: "Unisex Smart Wide
+ * Straight Pants" tells you nothing on a list of eight, "Uniqlo Unisex Smart
+ * Wide Straight Pants" tells you everything. Adapters that publish a brand
+ * already prepend it (see jsonld's titleOf); this covers the ones that don't.
+ *
+ * Only the entries that need spelling out live here. Everything else falls back
+ * to the domain's own name, which is usually right for the independents we
+ * track — mutimer.co, simuero.com, castlery.com, vetsak.com all read correctly
+ * as themselves. Shopify's `vendor` field looked like a better source until it
+ * came back "Simuero-2022"; the domain is steadier.
+ */
+const BRAND_ALIASES = {
+  "drmartens": "Dr. Martens",
+  "net-a-porter": "NET-A-PORTER",
+  "mrporter": "MR PORTER",
+  "endclothing": "END.",
+  "massimodutti": "Massimo Dutti",
+  "stories": "& Other Stories",
+  "shoptsuchi": "Tsuchi",
+  "ssense": "SSENSE",
+  "asos": "ASOS",
+  "cos": "COS",
+};
+
+/**
+ * Shops that sell OTHER people's brands. Their name is not the brand, and their
+ * product titles already carry the real one — so prefixing them produces
+ * "Farfetch LEMAIRE Small Croissant Bag" and "Ebay Vtg Carhartt Jacket", which
+ * is worse than the bare title, not better. Caught by eyeballing the output on
+ * the eight real items rather than by any test.
+ */
+const MULTI_BRAND_ADAPTERS = new Set([
+  "farfetch", "mrporter", "netaporter", "ssense", "cettire", "ebay", "amazon", "end", "asos",
+]);
+const MULTI_BRAND_HOSTS = new Set(["lookfantastic", "cultbeauty", "spacenk", "beautybay"]);
+
+/** Does this shop's own name belong in front of a product title? */
+export function isOwnBrand(host, adapter) {
+  if (adapter && MULTI_BRAND_ADAPTERS.has(adapter)) return false;
+  const sld = String(host || "").replace(/^www\./, "").toLowerCase().split(".")[0];
+  return !MULTI_BRAND_HOSTS.has(sld);
+}
+
+export function brandForHost(host) {
+  const h = String(host || "").replace(/^www\./, "").toLowerCase();
+  if (!h) return undefined;
+  // The registrable name: drmartens.com.sg -> drmartens, mutimer.co -> mutimer.
+  const sld = h.split(".")[0];
+  if (BRAND_ALIASES[sld]) return BRAND_ALIASES[sld];
+  // A single clean token title-cases well ("mutimer" -> "Mutimer"). Anything
+  // with digits or odd punctuation we leave alone rather than print a mangling.
+  if (!/^[a-z][a-z-]{2,}$/.test(sld)) return undefined;
+  return sld.split("-").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+}

@@ -2,6 +2,8 @@
 // better one. "…/products/wide-leg-wool-trouser?variant=42" -> "Wide Leg Wool
 // Trouser (brand.com)".
 
+import { brandForHost, isOwnBrand } from "./stores.mjs";
+
 const letters = (s) => (s.match(/[a-z]/gi) ?? []).length;
 
 export function labelFromUrl(url) {
@@ -28,4 +30,32 @@ export function labelFromUrl(url) {
   } catch {
     return url;
   }
+}
+
+/**
+ * The title we SHOW: the brand, then the product.
+ *
+ * A tracked title comes from whatever the shop published, and plenty of shops
+ * publish only the product half — "Unisex Smart Wide Straight Pants", which on a
+ * list of eight items tells you nothing about which shop it's from. Prepend the
+ * brand unless the title already leads with it, so nothing reads "Uniqlo Uniqlo
+ * …". Same idea as jsonld's titleOf(), applied to the adapters with no brand
+ * field to read.
+ *
+ * @param {{title?:string, url?:string}} product
+ */
+export function displayTitle(product) {
+  const title = String(product?.title ?? "").trim();
+  if (!title) return labelFromUrl(product?.url ?? "");
+  let host;
+  try { host = new URL(product.url).hostname; } catch { return title; }
+  // A marketplace's name is not a brand — farfetch.com sells LEMAIRE, and the
+  // title already says so.
+  if (!isOwnBrand(host, product?.adapter)) return title;
+  const brand = brandForHost(host);
+  if (!brand) return title;
+  // Already leads with it? Compare on letters alone, so "NET-A-PORTER" matches
+  // "Net a Porter" and "& Other Stories" matches "Other Stories".
+  const bare = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return bare(title).startsWith(bare(brand)) ? title : `${brand} ${title}`;
 }
