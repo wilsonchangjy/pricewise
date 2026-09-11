@@ -38,10 +38,15 @@ export function listKeyboard(subs) {
 
 /** The per-item action menu. The Size button is hidden for items with a single
  *  option (one size, one variant) — there'd be nothing to pick. */
-export function itemKeyboard(subId, { showSize = true, showMarket = true } = {}) {
+export function itemKeyboard(subId, { showSize = true, showMarket = true, showColour = false } = {}) {
+  // Colour gets its OWN button when the item has more than one. It used to hide
+  // behind 📏 Size, which opened a colour picker — so tapping "Size" showed
+  // three colours, and there was no way to change colour without walking through
+  // a size flow. Two attributes, two buttons.
   const row1 = showSize
     ? [btn("📏 Size", `s:${subId}`), btn("⏱ Every", `e:${subId}`)]
     : [btn("⏱ Every", `e:${subId}`)];
+  if (showColour) row1.unshift(btn("🎨 Colour", `C:${subId}`));
   // Market is hidden where a pin can't change what we read — a link that names
   // its own storefront (uniqlo.com/sg/en) or a shop that doesn't take ?country=.
   // Offering it there would be a control that controls nothing, and worse, one

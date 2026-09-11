@@ -25,6 +25,7 @@
 // trimmed fixture (test/fixtures/massimodutti-state.html).
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
+import { localeFromUrl } from "../locale.mjs";
 import { STATE, isBuyable, stateFromVisibility } from "../stock.mjs";
 
 const IN_STOCK = "SHOW"; // the only value that means "buy it now"
@@ -152,7 +153,10 @@ function findSizesArray(node) {
 export async function readInditex(item, ctx = {}) {
   const checkedAt = new Date().toISOString();
   const res = await fetchMaybeUnblocked(item, { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider,
-    startTier: ctx.startTier, country: "sg",
+    startTier: ctx.startTier, // The storefront must be the SAME one every check, or a "price drop" is
+    // just a different country's page. Prefer the row's pinned market, then
+    // the link's own locale, then SG — the same precedence as everywhere else.
+    country: (item.market ?? localeFromUrl(item.url).country ?? "sg").toLowerCase(),
     // The parser reads visibilityValue out of an application/json script, so the
     // gate asks for both. The bare marker alone can appear in a JS bundle on a
     // page whose state script never rendered — accepted, then unparseable.

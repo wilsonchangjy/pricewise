@@ -34,6 +34,13 @@ export function localeFromUrl(url) {
   let country;
   let m;
   if ((m = u.match(/[?&](?:countryIso|country|store)=([A-Za-z]{2})\b/i))) country = m[1];
+  // ?lang=en-US / ?lang=en_US — what a Farfetch app share-link carries, and it
+  // is a real statement about which storefront the link points at. Missing it
+  // meant a US link read as "no country", so we pinned the proxy to SG while the
+  // URL asked for the US site: the two fought, and which one won varied per
+  // check. That is how one bag reported 1247, 1339 SGD, 1145 and 966 USD across
+  // five readings and fired a 16%-off alert for a price that never moved.
+  else if ((m = u.match(/[?&]lang=[a-z]{2}[-_]([a-z]{2})\b/i))) country = m[1];
   // lang-COUNTRY, the shape SSENSE / MR PORTER / NET-A-PORTER use: /en-us/,
   // /en-sg/. Missed entirely before, so an SSENSE US link read as "no country"
   // — it dodged both the wrong-country warning and the swap to the local site,

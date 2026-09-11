@@ -11,7 +11,7 @@ import { selectAdapter } from "../_shared/adapters/index.mjs";
 import { evaluate } from "../_shared/alerting.mjs";
 import { sendMessage, isUnreachable } from "../_shared/telegram.mjs";
 import { contextLine } from "../_shared/history.mjs";
-import { matchVariant } from "../_shared/variants.mjs";
+import { matchVariant, variantFromSelector } from "../_shared/variants.mjs";
 import { verifyPrice } from "../_shared/verify.mjs";
 import { TIER_INTERVAL_MIN, ADAPTER_TIER, nextCheckDelayMinutes } from "../_shared/policy.mjs";
 
@@ -236,6 +236,30 @@ async function alertSubscriber(sub, product, prevReading, reading, priceTrusted 
   // this shop calls its sizes, so resolve it against the REAL labels. A default
   // that doesn't match is dropped, never approximated: watching the wrong size is
   // indistinguishable from working right up until the restock they miss.
+  // THE LINK'S OWN VARIANT COMES FIRST.
+  //
+  // A pasted URL can already name the exact thing: Uniqlo's
+  // ?colorDisplayCode=06&sizeDisplayCode=006 is a choice the shopper made in the
+  // shop, and /add reads it into variant_selector. The saved default is a
+  // fallback for links that DON'T say — so applying it over an explicit URL is
+  // the same mistake as overriding a /en-us/ link with an account country.
+  //
+  // Live: a cardigan link asking for colour 06 / size 006 was tracked as colour
+  // 06 / size 002, because the saved default "S" resolved first and the message
+  // then said "(Using your saved size S)" about a size the link had already
+  // specified. Same precedence rule as markets: explicit URL > account default.
+  if (!sub.variant_id) {
+    const fromUrl = variantFromSelector(reading.variants, product.variant_selector);
+    if (fromUrl) {
+      await db.from("subscriptions")
+        .update({ variant_id: String(fromUrl.id), variant_label: fromUrl.label, pending_size: null })
+        .eq("id", sub.id);
+      sub.variant_id = String(fromUrl.id);
+      sub.variant_label = fromUrl.label;
+      sub.pending_size = null;   // the default was never needed; don't announce it
+    }
+  }
+
   if (sub.pending_size && !sub.variant_id) {
     const hit = matchVariant(reading.variants, sub.pending_size);
     if (hit) {

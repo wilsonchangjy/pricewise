@@ -8,13 +8,17 @@
 // size's Zara sku (e.g. "519188937-251-2" for size S).
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
+import { localeFromUrl } from "../locale.mjs";
 import { parseJsonLd, hasJsonLdProduct } from "./jsonld.mjs";
 
 /** @param {import("../types.mjs").Item} item */
 export async function readZara(item, ctx = {}) {
   const checkedAt = new Date().toISOString();
   const res = await fetchMaybeUnblocked(item, { apiKey: ctx.unblockerKey, provider: ctx.unblockerProvider,
-    startTier: ctx.startTier, country: "sg",
+    startTier: ctx.startTier, // The storefront must be the SAME one every check, or a "price drop" is
+    // just a different country's page. Prefer the row's pinned market, then
+    // the link's own locale, then SG — the same precedence as everywhere else.
+    country: (item.market ?? localeFromUrl(item.url).country ?? "sg").toLowerCase(),
     // Require the PRODUCT node, not merely "some JSON-LD on the page". Zara
     // ships JSON-LD for breadcrumbs and organisation markup too, so the old
     // check passed on category pages and challenge shells alike — anything with

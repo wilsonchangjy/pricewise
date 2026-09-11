@@ -25,3 +25,27 @@ export function matchVariant(variants, input) {
     ?? variants.find((v) => fields(v).some((f) => f.includes(want)))
     ?? null;
 }
+
+/**
+ * The variant a URL already named, if the reading contains it.
+ *
+ * /add parses the shop's own codes out of the link into variant_selector —
+ * Uniqlo's { colorDisplayCode: "06", sizeDisplayCode: "006" } is the colour and
+ * size the shopper was actually looking at. Matching on BOTH is the point: this
+ * cardigan has three colours and six sizes, so a size alone picks the right row
+ * in the wrong colour.
+ *
+ * Returns null unless every code the URL specified is matched — a partial match
+ * is a guess, and guessing which variant someone meant is indistinguishable from
+ * working right up until the restock they miss.
+ */
+export function variantFromSelector(variants, selector) {
+  if (!Array.isArray(variants) || !selector || typeof selector !== "object") return null;
+  const size = selector.sizeDisplayCode ?? selector.sizeCode ?? selector.size;
+  const colour = selector.colorDisplayCode ?? selector.colourCode ?? selector.color;
+  if (size == null && colour == null) return null;
+  const same = (a, b) => a != null && b != null && String(a).trim() === String(b).trim();
+  return variants.find((v) =>
+    (size == null || same(v.sizeCode, size)) &&
+    (colour == null || same(v.colorCode, colour))) ?? null;
+}

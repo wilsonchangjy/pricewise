@@ -25,6 +25,7 @@
 // repeats it in its `variantId` field, so we match on that and read nothing else.
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
+import { localeFromUrl } from "../locale.mjs";
 import { STATE, isBuyable } from "../stock.mjs";
 import { decodeEntities } from "../text.mjs";
 
@@ -209,7 +210,10 @@ export async function readCettire(item, ctx = {}) {
     apiKey: ctx.unblockerKey,
     provider: ctx.unblockerProvider,
     startTier: ctx.startTier,
-    country: "sg",
+    // The storefront must be the SAME one every check, or a "price drop" is
+    // just a different country's page. Prefer the row's pinned market, then
+    // the link's own locale, then SG — the same precedence as everywhere else.
+    country: (item.market ?? localeFromUrl(item.url).country ?? "sg").toLowerCase(),
     // Demand the rendered catalogue state, not merely a 200 — a challenge page
     // carries neither, and this is the one marker the parser cannot work without.
     validate: hasCatalogState,

@@ -9,6 +9,7 @@
 // Track a size via variantSelector { size } (the size NAME, e.g. "36").
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
+import { localeFromUrl } from "../locale.mjs";
 import { parseJsonLd } from "./jsonld.mjs";
 
 /**
@@ -58,7 +59,10 @@ export async function readStories(item, ctx = {}) {
     apiKey: ctx.unblockerKey,
     provider: ctx.unblockerProvider,
     startTier: ctx.startTier,
-    country: "sg",
+    // The storefront must be the SAME one every check, or a "price drop" is
+    // just a different country's page. Prefer the row's pinned market, then
+    // the link's own locale, then SG — the same precedence as everywhere else.
+    country: (item.market ?? localeFromUrl(item.url).country ?? "sg").toLowerCase(),
     validate: (html) => /"sizes"\s*:\s*\[[^\]]*"sku"/.test(html),
   });
   if (!res.ok) {

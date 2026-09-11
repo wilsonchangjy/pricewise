@@ -10,6 +10,7 @@
 // both — before it did, this page read as per-size stock with NO price at all.
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
+import { localeFromUrl } from "../locale.mjs";
 import { parseJsonLd, hasJsonLdProduct } from "./jsonld.mjs";
 import { decodeEntities } from "../text.mjs";
 
@@ -35,7 +36,10 @@ export async function readFarfetch(item, ctx = {}) {
     apiKey: ctx.unblockerKey,
     provider: ctx.unblockerProvider,
     startTier: ctx.startTier,
-    country: "sg",
+    // The storefront must be the SAME one every check, or a "price drop" is
+    // just a different country's page. Prefer the row's pinned market, then
+    // the link's own locale, then SG — the same precedence as everywhere else.
+    country: (item.market ?? localeFromUrl(item.url).country ?? "sg").toLowerCase(),
     // A challenge page has no product JSON-LD — that's the signal to escalate
     // rather than parse a shell. Shared gate: see hasJsonLdProduct.
     validate: hasJsonLdProduct,

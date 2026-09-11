@@ -367,28 +367,42 @@ async function subscriptionList(userId) {
     // It only worked when a row for that (url, market) already existed — which
     // is exactly why SG succeeded on the two already-pinned items and nothing
     // else did.
-    .select("id, status, target_price, last_alert_price, tracked_products(id, url, title, adapter, fetch_strategy, currency, market, variant_selector, check_interval_minutes)")
+    .select("id, status, target_price, last_alert_price, variant_label, tracked_products(id, url, title, adapter, fetch_strategy, currency, market, variant_selector, check_interval_minutes)")
     .eq("user_id", userId)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
   return data ?? [];
 }
 
+/**
+ * ONE line-builder for the list, because there are two renderers.
+ *
+ * /list sent a full line — brand, price, storefront, URL — while ◀︎ Back
+ * re-drew the same list as bare titles, so tapping into an item and back out
+ * silently replaced the list with a thinner version of itself. Two functions
+ * rendering "the list" is how they drift; now there is one.
+ */
+function listLine(s, i) {
+  const p = s.tracked_products;
+  const bits = [];
+  if (s.last_alert_price != null) bits.push(`now ${fmt(Number(s.last_alert_price), p.currency)}`);
+  if (s.target_price != null) bits.push(`target ${fmt(Number(s.target_price), p.currency)}`);
+  if (s.variant_label) bits.push(s.variant_label);
+  if (p.market) bits.push(`${p.market} storefront`);
+  if (s.status === "paused") bits.push("paused");
+  // Worth saying out loud: this one spends the user's own unblocker credits.
+  if (p.fetch_strategy === "unblocker") bits.push("your key · daily");
+  return `${i + 1}. ${displayTitle(p)}${bits.length ? `\n   ${bits.join(" · ")}` : ""}\n   ${p.url}`;
+}
+
+const listHeader = (n) => `Tracking ${n} item${n > 1 ? "s" : ""} — tap a number to change one:`;
+const EMPTY_LIST = "Your list is empty — paste a product link to start tracking.";
+
 async function listItems(user, chatId) {
   const subs = await subscriptionList(user.id);
-  if (!subs.length) return reply(chatId, "Your list is empty — paste a product link to start tracking.");
-
-  const lines = subs.map((s, i) => {
-    const p = s.tracked_products;
-    const bits = [];
-    if (s.last_alert_price != null) bits.push(`now ${fmt(Number(s.last_alert_price), p.currency)}`);
-    if (s.target_price != null) bits.push(`target ${fmt(Number(s.target_price), p.currency)}`);
-    if (s.status === "paused") bits.push("paused");
-    if (p.fetch_strategy === "unblocker") bits.push("daily/your key");
-    return `${i + 1}. ${displayTitle(p)}${bits.length ? `\n   ${bits.join(" · ")}` : ""}\n   ${p.url}`;
-  });
+  if (!subs.length) return reply(chatId, EMPTY_LIST);
   return sendMessage(BOT_TOKEN, chatId,
-    `Tracking ${subs.length} item${subs.length > 1 ? "s" : ""} — tap a number to change one:\n\n${lines.join("\n\n")}`,
+    `${listHeader(subs.length)}\n\n${subs.map(listLine).join("\n\n")}`,
     { keyboard: listKeyboard(subs) });
 }
 
@@ -1192,6 +1206,7 @@ async function handleCallback(cq) {
   switch (action) {
     case "i": return renderItem(sub, chatId, messageId, cq.id);
     case "s": return renderSizes(sub, chatId, messageId, cq.id);
+    case "C": return renderColours(sub, chatId, messageId, cq.id);
     case "cc": return renderSizesForColour(sub, chatId, messageId, cq.id, arg);
     case "S": return applySize(sub, chatId, messageId, cq.id, arg);
     case "e":
@@ -1243,12 +1258,10 @@ async function ownedSub(userId, subId) {
 async function renderList(user, chatId, messageId, cqId) {
   if (cqId) await answerCallback(BOT_TOKEN, cqId);
   const subs = await subscriptionList(user.id);
-  if (!subs.length) {
-    return editMessage(BOT_TOKEN, chatId, messageId, "Your list is empty — paste a product link to start tracking.");
-  }
-  const lines = subs.map((s, i) => `${i + 1}. ${s.tracked_products.title}`);
+  if (!subs.length) return editMessage(BOT_TOKEN, chatId, messageId, EMPTY_LIST);
+  // Same builder as /list. This used to print bare titles.
   return editMessage(BOT_TOKEN, chatId, messageId,
-    `Tracking ${subs.length} item${subs.length > 1 ? "s" : ""} — tap a number to change one:\n\n${lines.join("\n")}`,
+    `${listHeader(subs.length)}\n\n${subs.map(listLine).join("\n\n")}`,
     { keyboard: listKeyboard(subs) });
 }
 
@@ -1276,11 +1289,17 @@ async function renderItem(sub, chatId, messageId, cqId) {
   if (sub.status === "paused") bits.push("paused");
   if (p.fetch_strategy === "unblocker") bits.push("daily/your key");
 
-  // Nothing to pick on a single-option item, so don't offer the Size button.
-  const showSize = (await latestVariants(p.id)).length > 1;
+  // Nothing to pick on a single-option item, so don't offer the Size button;
+  // and only offer Colour when the shop actually lists more than one.
+  const variants = await latestVariants(p.id);
   const text = `${displayTitle(p)}\n   ${bits.join(" · ")}\n\n${p.url}`;
-  return editMessage(BOT_TOKEN, chatId, messageId, text,
-    { keyboard: itemKeyboard(sub.id, { showSize, showMarket: marketIsChangeable(p) }) });
+  return editMessage(BOT_TOKEN, chatId, messageId, text, {
+    keyboard: itemKeyboard(sub.id, {
+      showSize: variants.length > 1,
+      showColour: variantColours(variants).length > 1,
+      showMarket: marketIsChangeable(p),
+    }),
+  });
 }
 
 /** The point of the whole feature: pick from what the shop ACTUALLY offers.
@@ -1297,14 +1316,37 @@ async function renderSizes(sub, chatId, messageId, cqId) {
   }
   await answerCallback(BOT_TOKEN, cqId);
 
+  // 📏 Size means SIZES. When the item has several colours, show the sizes of
+  // the one being watched rather than bouncing through a colour picker — the
+  // colour has its own button now. Only fall back to asking for a colour when we
+  // genuinely don't know which one this subscription is on.
   if (variantColours(variants).length > 1) {
+    const current = variants.find((v) => String(v.id) === String(sub.variant_id));
+    if (current?.colorCode != null) {
+      return renderSizesForColour(sub, chatId, messageId, null, current.colorCode);
+    }
     return editMessage(BOT_TOKEN, chatId, messageId,
-      `🎨 Which colour of ${p.title}?`,
+      `🎨 Which colour of ${p.title}? (then I'll ask the size)`,
       { keyboard: colourKeyboard(sub.id, variants, sub.variant_id) });
   }
   return editMessage(BOT_TOKEN, chatId, messageId,
     `📏 Which size of ${p.title}?\n✖️ = sold out right now (still worth watching — that's the point).`,
     { keyboard: sizeKeyboard(sub.id, variants, sub.variant_id) });
+}
+
+/** 🎨 Colour — a destination in its own right, not a step inside the size flow. */
+async function renderColours(sub, chatId, messageId, cqId) {
+  const p = sub.tracked_products;
+  const variants = await latestVariants(p.id);
+  if (variantColours(variants).length <= 1) {
+    await answerCallback(BOT_TOKEN, cqId,
+      variants.length ? "This item comes in one colour." : "I haven't read this one yet — try again after the next check.");
+    return renderItem(sub, chatId, messageId);
+  }
+  await answerCallback(BOT_TOKEN, cqId);
+  return editMessage(BOT_TOKEN, chatId, messageId,
+    `🎨 Which colour of ${p.title}?\nPick one and I'll show you its sizes.`,
+    { keyboard: colourKeyboard(sub.id, variants, sub.variant_id) });
 }
 
 /** The sizes of one colour, reached from the colour picker. */
