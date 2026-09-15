@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parseEbay, parseMoney, itemIdOf, stateFromEbay } from "../supabase/functions/_shared/adapters/ebay.mjs";
+import { parseEbay, parseMoney, itemIdOf, stateFromEbay, endedListing } from "../supabase/functions/_shared/adapters/ebay.mjs";
 import { normalizeUrl } from "../supabase/functions/_shared/urlguard.mjs";
 import { STATE } from "../supabase/functions/_shared/stock.mjs";
 
@@ -37,12 +37,83 @@ test("a real auction page is refused permanently, on sight", () => {
 // couldn't be read from it and the whole listing soft-failed ("couldn't tell
 // whether this listing is live"). The price block still renders "or Best Offer",
 // which is enough to know it's a live fixed-price listing.
-test("a broken buy-box falls back to the price block, not a soft failure", () => {
-  const r = parseEbay(fixture("ebay-buybox-error.html"), { url: "https://www.ebay.com/itm/318509998125" });
-  assert.equal(r.ok, true, "must not soft-fail just because eBay's buy-box module errored");
-  assert.equal(r.price, 275);
-  assert.equal(r.variants[0].state, STATE.IN_STOCK);
+// ── a sold one-off is OVER ───────────────────────────────────────────────────
+// LIVE, 2026-09-16. The tracked Carhartt jacket (318509998125) sold on Jul 21.
+// eBay says "This listing sold on…"; only "has ended" / "was ended" were known.
+// With no quantity line and an empty buy-box, the parser fell through to the
+// price block — "US $275.00 or Best Offer", struck through — and read IN STOCK
+// every day for 54 days. The test that stood here asserted exactly that, on a
+// fixture of this very page with its sold banner trimmed off, under the belief
+// that eBay had served a "broken buy-box". Every eBay page carries that hidden
+// "Oops!" template; it was never broken.
+
+const SOLD = fixture("ebay-sold.html");                 // sold Jul 21, relisted
+const RELIST_SOLD = fixture("ebay-relist-sold.html");   // the relist, sold Aug 10
+const SOLD_NO_BANNER = fixture("ebay-sold-no-banner.html");
+
+test("a sold listing is ENDED — not in stock, and not a broken buy-box", () => {
+  const r = parseEbay(SOLD, { url: "https://www.ebay.com/itm/318509998125", currency: "USD" });
+  assert.equal(r.ok, true);
+  assert.equal(r.available, false);
+  assert.equal(r.variants[0].state, STATE.OUT_OF_STOCK);
+  assert.equal(r.ended.sold, true);
+  assert.equal(r.ended.when, "Tue, Jul 21");
+  assert.match(r.ended.message, /^This listing sold on Tue, Jul 21/);
+  assert.equal(r.price, undefined, "the struck-through asking price is not what it sold for");
   assert.match(r.title, /Carhartt Brown Detroit/);
+});
+
+test("the relist link is read from the item's own banner", () => {
+  assert.equal(endedListing(SOLD).relistUrl, "https://www.ebay.com/itm/318619824336");
+});
+
+test("a sold page with no relist offers none — the carousel's links are strangers' listings", () => {
+  const e = endedListing(RELIST_SOLD);
+  assert.equal(e.sold, true);
+  assert.equal(e.when, "Mon, Aug 10");
+  assert.equal(e.relistUrl, null);
+  assert.match(RELIST_SOLD, /itm\/318560035099/, "the fixture really does carry another listing's link");
+});
+
+test("the relist's price isn't struck through — the banner alone has to decide", () => {
+  const r = parseEbay(RELIST_SOLD, { url: "https://www.ebay.com/itm/318619824336" });
+  assert.equal(r.ok, true);
+  assert.equal(r.available, false);
+  assert.ok(r.ended);
+});
+
+test("the July fixture — the sold page with its banner cut out — is 'can't tell', never 'in stock'", () => {
+  const r = parseEbay(SOLD_NO_BANNER, { url: "https://www.ebay.com/itm/318509998125" });
+  assert.equal(r.ok, false);
+  assert.equal(r.kind, "soft");
+});
+
+test("a live listing whose buy-box renders no CTA is still read from its price block", () => {
+  // The shape of the seller's other, live listings on the same day: no quantity
+  // line, no CTA list, an unstruck "US $… or Best Offer". July's fallback exists
+  // for these, and must keep working.
+  const live = RELIST_SOLD.replace(/<div data-testid="ux-layout-section__item"[\s\S]*?<\/div> <!--F\/--><\/div><\/div>/, "");
+  assert.equal(endedListing(live), null, "banner really removed");
+  const r = parseEbay(live, { url: "https://www.ebay.com/itm/318767435400" });
+  assert.equal(r.ok, true);
+  assert.equal(r.available, true);
+  assert.equal(r.price, 275);
+});
+
+test("an ended AUCTION reports the ending, not 'I don't track auctions'", () => {
+  const html = `<title>Old Levi's | eBay</title>
+    <div class="ux-layout-section__textual-display ux-layout-section__textual-display--statusMessage"><span>Bidding ended on Sat, Aug 1 at 9:00 PM.</span></div>
+    <div class=x-buybox><div class=x-buybox-cta><a>Place bid</a></div></div>`;
+  const r = parseEbay(html, { url: "https://www.ebay.com/itm/123456789012" });
+  assert.equal(r.ok, true);
+  assert.ok(r.ended);
+  assert.equal(r.ended.sold, false);
+});
+
+test("wording inside a <style> or <script> block is not the page saying it ended", () => {
+  const html = `<style>.x::after{content:"This listing sold on"}</style><script>var t="This listing has ended";</script>${FIXED}`;
+  assert.equal(endedListing(html), null);
+  assert.equal(parseEbay(html, { url: "https://www.ebay.com/itm/287062522407?var=589110017587" }).available, true);
 });
 
 test("eBay's money formats parse, including the European decimal", () => {

@@ -13,6 +13,7 @@ import { sendMessage, isUnreachable } from "../_shared/telegram.mjs";
 import { contextLine } from "../_shared/history.mjs";
 import { matchVariant, variantFromSelector } from "../_shared/variants.mjs";
 import { verifyPrice } from "../_shared/verify.mjs";
+import { followRelist, endedMessage } from "../_shared/ended.mjs";
 import { TIER_INTERVAL_MIN, ADAPTER_TIER, nextCheckDelayMinutes } from "../_shared/policy.mjs";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -175,6 +176,13 @@ async function checkProduct(product) {
       variants: reading.variants ?? [],
       raw_status: reading.available ? "ok" : "oos", // may be rewritten to 'soft' below
     });
+  }
+
+  // AN ENDED LISTING IS OVER, NOT OUT OF STOCK. The generic path would send
+  // "SOLD OUT" and keep checking forever, spending the watcher's credits on a
+  // page that will never change. Say it once, offer the relist, stop.
+  if (reading.ended) {
+    return await retireEndedListing(product, subs, reading, { unblockerKey, unblockerProvider });
   }
 
   // Verify BEFORE we make a price claim. Cost lands on alerts, not on checks:
@@ -436,6 +444,55 @@ async function maybeVerify(product, reading, priceMoved) {
     console.error(`verify ${product.id} DISAGREE: ${verdict.reason} — withholding price claims`);
   }
   return verdict;
+}
+
+/**
+ * Tell every watcher their listing ended, offer the relist, and stop watching.
+ *
+ * Retirement is delivery-gated like every other alert: a watcher is removed only
+ * once Telegram took the message (or their chat is gone for good). If anyone's
+ * send failed transiently, the product stays live and the next tick re-reads it,
+ * re-detects the ending and retries just them — the ones already told are gone.
+ *
+ * Removing the subscription is exactly what /remove does, and it's what the
+ * message promises. It also deletes that subscription's alert rows (the foreign
+ * key cascades), so the notice is logged here instead.
+ */
+async function retireEndedListing(product, subs, reading, ctx) {
+  const read = (url) => selectAdapter(product.adapter)({
+    id: `${product.id}-relist`,
+    label: product.title,
+    url,
+    adapter: product.adapter,
+    variantSelector: {},
+    currency: product.currency ?? undefined,
+  }, ctx);
+  const relist = reading.ended.relistUrl ? await followRelist(reading.ended.relistUrl, read) : null;
+  const { text, keyboard } = endedMessage({ title: product.title, url: product.url }, reading.ended, relist);
+  const relistNote = relist
+    ? `; relist ${relist.url} ${relist.ended ? "also ended" : relist.unread ? "unreadable" : relist.live ? "live" : "not buyable"}`
+    : "";
+
+  let sent = 0;
+  let pending = 0;
+  for (const sub of subs) {
+    const res = await sendMessage(BOT_TOKEN, sub.users.telegram_chat_id, text, { keyboard });
+    if (!res?.ok && !isUnreachable(res)) { pending++; continue; }
+    await db.from("subscriptions").delete().eq("id", sub.id);
+    console.log(`ended listing ${product.id}: ${res?.ok ? "told" : "chat gone for"} subscription ${sub.id} — ${reading.ended.message}${relistNote}`);
+    if (res?.ok) sent++;
+  }
+
+  await db.from("tracked_products").update(pending
+    ? { last_ok_at: new Date().toISOString(), consecutive_failures: 0, next_check_at: minutesFromNow(30) }
+    : {
+        status: "dead",
+        verify_note: `ended: ${reading.ended.message}`.slice(0, 200),
+        last_ok_at: new Date().toISOString(),
+        consecutive_failures: 0,
+      }).eq("id", product.id);
+
+  return { ok: true, alerts: sent };
 }
 
 /** product_readings row -> the Reading shape alerting.mjs expects. */

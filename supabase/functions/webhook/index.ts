@@ -827,6 +827,17 @@ async function trackCandidate(user, chatId, messageId, cqId, arg, originalText =
   return addItem(user, chatId, pick.url);
 }
 
+/** The relist button from a "🏁 SOLD" message. */
+async function trackRelist(user, chatId, messageId, cqId, itemId, originalText = "") {
+  if (!/^\d{9,15}$/.test(String(itemId ?? ""))) return answerCallback(BOT_TOKEN, cqId);
+  await answerCallback(BOT_TOKEN, cqId, "Adding the relist…");
+  // Keep the message, drop the button, so the relist can't be added twice.
+  if (originalText) {
+    await editMessage(BOT_TOKEN, chatId, messageId, originalText, { keyboard: { inline_keyboard: [] } });
+  }
+  return addItem(user, chatId, `https://www.ebay.com/itm/${itemId}`);
+}
+
 /** Strip the "tap one to track" invitation once something has been tapped. */
 function withoutTapFooter(text) {
   const at = String(text ?? "").indexOf(TAP_FOOTER.split("\n")[0]);
@@ -1196,6 +1207,10 @@ async function handleCallback(cq) {
     // the user's row, so there's no subscription to own yet.
     case "f":  return trackCandidate(user, chatId, messageId, cq.id, arg, cq.message?.text ?? "");
     case "fx": return dismissCandidates(user, chatId, messageId, cq.id, cq.message?.text ?? "");
+    // "Track the relist", offered when an eBay listing sold. The id is
+    // user-supplied bytes like any callback — digits only — and it then goes
+    // through addItem's full checks, exactly as if the link had been pasted.
+    case "rl": return trackRelist(user, chatId, messageId, cq.id, arg, cq.message?.text ?? "");
   }
 
   const sub = subId === undefined ? null : await ownedSub(user.id, subId);

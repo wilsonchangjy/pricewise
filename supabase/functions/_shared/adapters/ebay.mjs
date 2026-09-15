@@ -15,6 +15,11 @@
 // 2. Listings END. A vintage one-off that sells is gone for good, not
 //    restocked — which makes "still there?" the more valuable question here,
 //    and an ended listing something we must report rather than retry forever.
+//
+//    And eBay says so in its OWN words, which are not the ones we first guessed:
+//    a sold one-off reads "This listing sold on Tue, Jul 21 at 2:52 PM." Only
+//    "has ended" / "was ended" were recognised, so a sold Carhartt jacket read as
+//    IN STOCK at US $275 for 54 days and nobody was told. See endedListing().
 
 import { fetchMaybeUnblocked } from "../unblocker.mjs";
 import { STATE, isBuyable } from "../stock.mjs";
@@ -48,15 +53,63 @@ export function itemIdOf(url) {
 }
 
 /**
+ * The phrases eBay uses when a listing is OVER. Kept non-global so .test() has
+ * no lastIndex state; endedListing() makes its own global copy to walk matches.
+ */
+const ENDED = /This listing (?:sold|ended|has ended|was ended)\b[^<]{0,80}|Bidding (?:has )?ended[^<]{0,60}|(?:This item is )?no longer available|item is no longer[^<]{0,40}/i;
+
+/** Is this offset inside a <style> or <script> block rather than rendered markup? */
+const inStyleOrScript = (s, i) =>
+  s.lastIndexOf("<style", i) > s.lastIndexOf("</style", i) ||
+  s.lastIndexOf("<script", i) > s.lastIndexOf("</script", i);
+
+/**
+ * Has this listing ENDED — sold, or ended by the seller?
+ *
+ * Returns null for a live listing, otherwise what eBay said:
+ *   { sold, when, message, relistUrl }
+ *
+ * FOUND THE HARD WAY. The sold page for 318509998125 has no quantity line and an
+ * empty buy-box, so the parser fell through to the price block — which still
+ * shows "US $275.00 or Best Offer", struck through — and called it a live
+ * fixed-price listing. A July fix made that worse: the soft failures were eBay's
+ * sold page all along, misread as a "broken buy-box" because every eBay page
+ * carries a hidden "Oops! …trouble connecting" template. The fixture that fix
+ * added (now ebay-sold-no-banner.html) was this page with its banner trimmed off.
+ *
+ * The relist link is taken only when it sits right against "relisted this item"
+ * in the banner. The sold page carries ~50 other /itm/ links in its carousels,
+ * and following one of those would offer someone a stranger's jacket.
+ */
+export function endedListing(html) {
+  const s = String(html);
+  const walk = new RegExp(ENDED.source, "gi");
+  let m;
+  while ((m = walk.exec(s))) {
+    if (inStyleOrScript(s, m.index)) continue;
+    const message = decodeEntities(m[0]).replace(/\s+/g, " ").trim();
+    const window = s.slice(m.index, m.index + 1500);
+    const relistUrl = (window.match(
+      /href=["']?(https:\/\/www\.ebay\.com\/itm\/\d{9,})[^>]*>(?:\s|<[^>]+>)*relisted this item/i,
+    ) || [])[1] ?? null;
+    return {
+      sold: /\bsold\b/i.test(message),
+      when: (message.match(/\bon ((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [A-Z][a-z]{2} \d{1,2})\b/) || [])[1] ?? null,
+      message: message.slice(0, 160),
+      relistUrl,
+    };
+  }
+  return null;
+}
+
+/**
  * eBay states availability in prose and it varies by listing type. Unrecognised
  * wording means we don't know — never "in stock", which would send someone to a
  * listing that may have ended.
  */
 export function stateFromEbay(html) {
   // Ended listings are a page-level fact, so this check is page-wide.
-  if (/This listing (has ended|was ended)|no longer available|item is no longer/i.test(html)) {
-    return STATE.OUT_OF_STOCK;
-  }
+  if (endedListing(html)) return STATE.OUT_OF_STOCK;
 
   // EVERYTHING ELSE MUST BE SCOPED. An eBay page carries carousels of other
   // people's listings, each with its own badge — this page had four "LAST ONE"
@@ -101,6 +154,17 @@ export function listingKind(html) {
   // shows a bid count. Scoped to ~400 chars so a carousel's CTA can't leak in.
   const p = String(html).search(/x-price-primary/i);
   if (p >= 0) {
+    // A PRIMARY price that is struck through is a price no longer on offer — it
+    // is how the sold page renders its old asking price. Without an ended banner
+    // to go on, that is "can't tell", never "live".
+    //
+    // Judged on the FIRST text span inside the price block, which is the price
+    // itself. eBay nests it two ways: today's page wraps it in
+    // x-price-primary__price, the July capture through the unblocker did not.
+    // A discounted live listing strikes its WAS price in a later element, so the
+    // first span stays unstruck there.
+    const firstSpan = String(html).slice(p, p + 400).match(/<span[^>]*\bux-textspans\b[^>]*>/i);
+    if (firstSpan && /ux-textspans--STRIKETHROUGH/i.test(firstSpan[0])) return null;
     const near = String(html).slice(p, p + 400).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
     if (/or Best Offer|Buy It Now/i.test(near)) return "fixed";
     if (/\bbids?\b|Current bid/i.test(near)) return "auction";
@@ -131,6 +195,31 @@ export function parseEbay(html, item) {
   const title = decodeEntities(String(rawTitle ?? "")).replace(/\s+/g, " ").trim();
   if (!title) {
     return { ok: false, kind: "parse", message: "ebay: no listing title (blocked, or the page shape changed)", checkedAt };
+  }
+
+  // An ENDED listing is reported as over, and it comes first: a finished auction
+  // still shows its bids, and "I don't track auctions" is the wrong thing to tell
+  // someone whose item just sold. No price is claimed — the struck "US $275.00"
+  // is the old asking price, and "Best offer accepted" says it sold for something
+  // else we can't see.
+  const ended = endedListing(html);
+  if (ended) {
+    return {
+      ok: true,
+      price: undefined,
+      currency: item.currency ?? "USD",
+      available: false,
+      ended,
+      variants: [{
+        id: String(item.variantSelector?.variation ?? item.variantSelector?.itemId ?? itemIdOf(item.url) ?? "default"),
+        label: title.slice(0, 60),
+        price: undefined,
+        available: false,
+        state: STATE.OUT_OF_STOCK,
+      }],
+      title,
+      checkedAt,
+    };
   }
 
   // Auctions are a different product from the one we alert on. Say so once,
@@ -196,8 +285,7 @@ export async function readEbay(item, ctx = {}) {
     // what listingKind falls back to, so it's the one element we cannot proceed
     // without. Ended listings are exempt — they legitimately may not price, and
     // stateFromEbay detects them page-wide.
-    validate: (html) => /x-price-primary/.test(html)
-      || /This listing (has ended|was ended)|no longer available/i.test(html),
+    validate: (html) => /x-price-primary/.test(html) || ENDED.test(html),
   });
   if (!res.ok) {
     const kind = res.status === 403 ? "blocked" : res.error === "timeout" ? "timeout" : "http";
