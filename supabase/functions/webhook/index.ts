@@ -721,6 +721,7 @@ async function runSearch(user, chatId, query, token) {
     userHasUnblockerKey: Boolean(keyRow),
     country,
     max: MAX_CANDIDATES,
+    logSearch: true,
     // Remembering WHERE something was found makes a retry — and a second person
     // asking the same thing — free. The pages are still read fresh every time.
     cache: {

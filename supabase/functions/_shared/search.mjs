@@ -36,6 +36,12 @@ export const MAX_CANDIDATES = 3;
  *  between the user and the paid one — it has to fail FAST, not thoroughly. */
 const SHOP_TIMEOUT_MS = 5_000;
 const GUESS_BUDGET_MS = 12_000;
+/** How long a confident answer waits on a MORE confident guess still in flight. */
+const GUESS_GRACE_MS = 2_000;
+/** Enough for "…from Brand" + opening + closing words; beyond it is noise. */
+const MAX_GUESSES = 9;
+/** A title matching this share of the best title's words counts as equally relevant. */
+const RELEVANCE_TIER = 0.75;
 
 /**
  * How many BOT-PROTECTED pages one search may read.
@@ -57,6 +63,9 @@ const MAX_DEFENDED_READS = 3;
 const MAX_FREE_READS = 6;
 
 /** Shops whose search we can query for free, by platform. */
+/** searchStore's marker for "the host gave no HTTP answer at all". */
+const UNREACHABLE = Symbol("unreachable");
+
 const SHOPIFY_SUGGEST = (origin, q) =>
   `${origin}/search/suggest.json?q=${encodeURIComponent(q)}&resources%5Btype%5D=product&resources%5Blimit%5D=6`;
 const WOO_SEARCH = (origin, q) =>
@@ -88,11 +97,17 @@ export async function searchStore(origin, query, { fetchImpl = fetch, timeoutMs 
     try {
       const r = await fetchImpl(u, { headers: { accept: "application/json" }, signal: ctrl.signal });
       return r.ok ? await r.text() : null;
-    } catch { return null; } finally { clearTimeout(timer); }
+    } catch { return UNREACHABLE; } finally { clearTimeout(timer); }
   };
 
   // Shopify
   const sug = await get(SHOPIFY_SUGGEST(origin, query));
+  // A host that gave no answer at all — no DNS, refused, or a connect that hangs
+  // until our timeout — won't answer the next three questions either. A 404 is
+  // an ANSWER, and still falls through to WooCommerce below. Measured:
+  // bmagazine.com hangs on connect, and asking it Shopify's route and then three
+  // WooCommerce terms turned one 5-second timeout into twenty.
+  if (sug === UNREACHABLE) return [];
   if (sug) {
     try {
       const products = JSON.parse(sug)?.resources?.results?.products ?? [];
@@ -113,6 +128,7 @@ export async function searchStore(origin, query, { fetchImpl = fetch, timeoutMs 
   const terms = [query, ...longestWordsOf(query)];
   for (const term of terms) {
     const woo = await get(WOO_SEARCH(origin, term));
+    if (woo === UNREACHABLE) break;
     if (!woo) continue;
     try {
       const list = JSON.parse(woo);
@@ -141,30 +157,82 @@ export function domainGuesses(query) {
 }
 
 /**
- * Domain guesses paired with WHAT'S LEFT of the query after the brand words are
+ * Words that stitch a sentence together. "from", "by" and "at" do more than
+ * stitch: whatever follows them names who MAKES the thing ("Saria silk midi from
+ * Nol Collective"), which is the strongest brand signal a sentence gives.
+ */
+const MAKER_MARKERS = new Set(["from", "by", "at"]);
+const STOPWORDS = new Set(["in", "on", "of", "for", "with", "and", "to", "a", "an", "the"]);
+
+/**
+ * The words of a query that could name a brand or a product.
+ *
+ * A SIZE is stripped. "size S" chooses a variant once the item is tracked — it
+ * never chooses the product — and left in, a lone "s" becomes a domain guess.
+ *
+ * A COLOUR is kept, deliberately. Nol Collective lists "Saria midi skirt (natural
+ * linen)" and "(scarlet linen)" as separate products, and its search puts the
+ * scarlet one first for "saria midi scarlet" and the natural one first for
+ * "saria midi natural". Dropping the colour would hand back the wrong product.
+ */
+export function queryWords(query) {
+  return String(query).toLowerCase()
+    .replace(/\b(?:size|sz)(?:\s*[:=]\s*|\s+)[a-z0-9./-]+\b/g, " ")
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Domain guesses paired with WHAT'S LEFT of the query once the brand words are
  * removed. Passing the whole phrase to the shop's own search is a mistake: the
  * brand name is in the domain, not the product titles, so "goshopia scarlett
  * dress" matched nothing on goshopia.com while "scarlett dress" matches exactly.
+ *
+ * WHERE THE BRAND SITS IN THE SENTENCE MUST NOT MATTER. This used to try only the
+ * opening words, so "Nol Collective Saria silk midi" found the skirt while "Saria
+ * silk midi from Nol Collective, size S" — the same words, brand last — guessed
+ * sariasilkmidi.com, sariasilk.com and saria.com, spent 10.9 seconds on them, and
+ * never asked nolcollective.com at all. The shop's own search was never the
+ * problem: it returns the Saria skirts for every one of those phrasings.
+ *
+ * So guesses come from three places, most confident first:
+ *   maker   whatever follows "from" / "by" / "at"
+ *   prefix  the opening words — how most people start, and exactly the old order
+ *   suffix  the closing words — "Saria silk midi Nol Collective", brand last
+ * The order is a RANKING, not a schedule: storeSearchSource asks them all at once
+ * and prefers the most confident guess that answers.
  */
 export function guessesWithRemainder(query) {
-  const words = String(query).toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean);
+  const words = queryWords(query);
   const out = [];
   const seen = new Set();
-  // Longest brand-ish prefix first: "our legacy camion boots" → ourlegacycamion,
-  // ourlegacy, our — the middle one is usually the brand.
-  for (const n of [3, 2, 1]) {
-    if (words.length < n) continue;
-    const name = words.slice(0, n).join("");
-    if (name.length < 3 || seen.has(name)) continue;
+
+  const add = (start, n, basis) => {
+    if (start < 0 || start + n > words.length) return;
+    const slice = words.slice(start, start + n);
+    // A clause boundary inside a name means two things glued together.
+    if (slice.some((w) => MAKER_MARKERS.has(w))) return;
+    // "…bag in" is never a brand. A LEADING small word can be — The Row, On
+    // Running — so it is allowed where people start a name, and always for "the".
+    if (STOPWORDS.has(slice[slice.length - 1])) return;
+    if (STOPWORDS.has(slice[0]) && basis !== "prefix" && slice[0] !== "the") return;
+    const name = slice.join("");
+    if (name.length < 3 || seen.has(name)) return;
     seen.add(name);
+    const rest = words.filter((w, i) => (i < start || i >= start + n) && !MAKER_MARKERS.has(w));
     out.push({
       name,
+      basis,
       // Keep the whole phrase as a fallback when stripping leaves nothing.
-      remainder: words.slice(n).join(" ") || words.join(" "),
+      remainder: rest.join(" ") || slice.join(" "),
       origins: [`https://www.${name}.com`, `https://${name}.com`, `https://${name}.co`],
     });
-  }
-  return out;
+  };
+
+  words.forEach((w, i) => { if (MAKER_MARKERS.has(w)) for (const n of [3, 2, 1]) add(i + 1, n, "maker"); });
+  for (const n of [3, 2, 1]) add(0, n, "prefix");
+  for (const n of [3, 2, 1]) add(words.length - n, n, "suffix");
+  return out.slice(0, MAX_GUESSES);
 }
 
 /**
@@ -356,9 +424,38 @@ async function resolveItem(d, ctx) {
  * 455 is not — it needs an FX rate, and a view on duties and shipping that we
  * don't have. So same-currency candidates sort by price, and the rest keep their
  * order and let the shopper compare the native prices we print for them.
+ *
+ * AND BEFORE AVAILABILITY: is this even the thing they asked for? Availability
+ * first was designed for one product at several shops — keep the copy you can
+ * buy. It was never meant to choose between DIFFERENT products, and one shop's
+ * search returns exactly that. Live: Mutimer's own search put "Funnel Neck
+ * Blouson" first for "Mutimer Funnel Neck Blouson in Size XS"; it was sold out,
+ * so an in-stock Flight Jacket and Mad. Avenue Coat outranked it and the blouson
+ * was cut from a list of three. Nol Collective's Talia silk top led ahead of the
+ * two Saria skirts someone had named.
+ *
+ * Relevance is a TIER, not a count, so it can't undo what availability is for.
+ * The same bag reads "LEMAIRE Small Croissant Bag In Leather" on Farfetch and
+ * "Small Croissant Bag" on lemaire.fr — one word apart only because one repeats
+ * the brand. Anything within RELEVANCE_TIER of the best match is equally
+ * relevant, stock decides inside that, and the raw count breaks what's left
+ * ("…in scarlet" puts the scarlet skirt ahead of the natural one).
  */
-export function rankCandidates(verified, { size, country } = {}) {
+export function rankCandidates(verified, { size, country, query } = {}) {
   const want = country ? String(country).toUpperCase() : null;
+
+  const productWords = query
+    ? queryWords(query).filter((w) => !MAKER_MARKERS.has(w) && !STOPWORDS.has(w))
+    : [];
+  const matched = new Map();
+  for (const v of verified) {
+    const title = new Set(queryWords(v.reading?.title || v.hint || ""));
+    matched.set(v, productWords.filter((w) => title.has(w)).length);
+  }
+  const bestMatch = Math.max(0, ...matched.values());
+  // No query, or nothing matched anything: every candidate is equally relevant,
+  // which leaves the ranking exactly as it always was.
+  const relevant = (v) => (bestMatch === 0 || matched.get(v) / bestMatch >= RELEVANCE_TIER ? 1 : 0);
 
   // Only currencies that appear more than once are comparable — a lone GBP
   // result has nothing to be cheaper than.
@@ -376,9 +473,11 @@ export function rankCandidates(verified, { size, country } = {}) {
       : null;
     return [
       want && v.country && v.country !== want ? 0 : 1,           // buyable where you are
+      relevant(v),                                                // the thing you named
       wanted ? (wanted.available ? 2 : 0) : (r.available ? 1 : 0), // your size, else anything
       variants.some((x) => isBuyable(x.state)) ? 1 : 0,
       -(variants.length ? 0 : 1), // a reading with real per-size data beats one without
+      matched.get(v) ?? 0,        // closer to your words, among the equally relevant
       // Cheapest first among like-for-like. Negated because the comparator sorts
       // descending, and left out entirely when there's nothing to compare with.
       r.price != null && counts.get(r.currency) > 1 ? -Number(r.price) : 0,
@@ -403,8 +502,11 @@ export function rankCandidates(verified, { size, country } = {}) {
  * camion boots" are one query, which they plainly are.
  */
 export function cacheKeyFor(query) {
-  return String(query).toLowerCase().replace(/[^a-z0-9 ]+/g, " ")
-    .split(/\s+/).filter(Boolean).sort().join(" ");
+  // So are "Saria silk midi from Nol Collective, size S" and "Nol Collective
+  // Saria silk midi": the cache remembers WHERE something was found, and neither
+  // "from" nor a size changes where that is. A colour does, so it stays — see
+  // queryWords.
+  return queryWords(query).filter((w) => !MAKER_MARKERS.has(w)).sort().join(" ");
 }
 
 export async function findProduct(query, ctx = {}) {
@@ -420,7 +522,7 @@ export async function findProduct(query, ctx = {}) {
   if (cached?.length) {
     await verifyCandidates(cached, ctx, acc);
     if (acc.out.length) {
-      const hit = dedupeByProduct(rankCandidates(acc.out, ctx)).slice(0, want);
+      const hit = dedupeByProduct(rankCandidates(acc.out, { ...ctx, query })).slice(0, want);
       hit.notes = [];
       hit.cached = true;
       return hit;
@@ -435,15 +537,29 @@ export async function findProduct(query, ctx = {}) {
   // genuinely delivered, and a free hit that fails verification still falls
   // through to the model the user is paying for.
   for (const src of sources) {
+    let hits = [];
     try {
-      const hits = await src(query, ctx);
+      hits = await src(query, ctx);
       if (hits.note) notes.push(hits.note);
       await verifyCandidates(hits, ctx, acc);
     } catch { /* a dead source is not fatal */ }
+    // One line per source. An empty search used to leave no trace at all, so
+    // "the model said NONE", "the model pointed at shops we can't read" and "the
+    // model never ran" looked identical afterwards — and the only way to tell
+    // them apart was to spend the user's key again.
+    if (ctx.logSearch) {
+      const hosts = [...new Set((hits ?? []).map((h) => {
+        try { return new URL(h.url).hostname; } catch { return "?"; }
+      }))].slice(0, 5);
+      console.log(`search source ${src.name || "custom"}: ${hits?.length ?? 0} candidate(s)`
+        + (hosts.length ? ` [${hosts.join(", ")}]` : "")
+        + `, ${acc.out.length} verified so far`
+        + (hits?.note ? `; note: ${hits.note}` : ""));
+    }
     if (acc.out.length >= want) break;
   }
 
-  const ranked = dedupeByProduct(rankCandidates(acc.out, ctx)).slice(0, want);
+  const ranked = dedupeByProduct(rankCandidates(acc.out, { ...ctx, query })).slice(0, want);
   ranked.notes = notes;
 
   // Remember what we FOUND, not what we read — and only when we found something.
@@ -522,22 +638,99 @@ export function sourcesFor(ctx = {}) {
   return ctx.ai?.apiKey ? [storeSearchSource, aiSearchSource] : [storeSearchSource];
 }
 
-/** The free source: guess the brand's shop, ask its own search engine — with the
- *  brand words STRIPPED, since they name the domain, not the product. */
-export async function storeSearchSource(query, ctx = {}) {
-  // Nine guessed origins × up to four requests each is a lot of waiting for a
-  // brand that turns out not to run on Shopify or Woo. Give the whole guessing
-  // phase a budget: past it, "I don't know this shop" is the answer, and the
-  // model source (if the user has one) is a better use of the next 10 seconds.
-  const deadline = Date.now() + (ctx.guessBudgetMs ?? GUESS_BUDGET_MS);
-  for (const guess of guessesWithRemainder(query)) {
-    for (const origin of guess.origins) {
-      if (Date.now() > deadline) return [];
-      const hits = await searchStore(origin, guess.remainder, ctx);
-      if (hits.length) return hits; // first shop that answers wins
-    }
+/**
+ * Does a shop's own name say it IS the brand we guessed?
+ *
+ * A guess from the closing words is the least confident kind — "…in black"
+ * guesses black.com, "…vitamin c serum" guesses serum.com — and "first shop that
+ * answers wins" would hand a stranger's catalogue to someone who asked for Nol
+ * Collective. Checked against real shops: Shopify's /meta.json names them exactly
+ * ("Nol Collective", "Mutimer", "Simuero", "Dr. Martens™ SG Official Site"), and
+ * WooCommerce's /wp-json does the same ("Goshopia").
+ *
+ * A short guess must match the whole name: "black" is not vouched for by a shop
+ * called "Black Tee Co", while "drmartens" is by "Dr. Martens™ SG Official Site".
+ */
+export async function shopNameOf(origin, { fetchImpl = fetch, timeoutMs = SHOP_TIMEOUT_MS } = {}) {
+  for (const path of ["/meta.json", "/wp-json"]) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetchImpl(`${origin}${path}`, { headers: { accept: "application/json" }, signal: ctrl.signal });
+      if (!r.ok) continue;
+      const name = JSON.parse(await r.text())?.name;
+      if (typeof name === "string" && name.trim()) return name.trim();
+    } catch { /* not this platform */ } finally { clearTimeout(timer); }
   }
-  return [];
+  return undefined;
+}
+
+export async function shopIsBrand(origin, guessName, ctx = {}) {
+  const shop = String((await shopNameOf(origin, ctx)) ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!shop) return false;
+  return shop === guessName || (guessName.length >= 6 && shop.startsWith(guessName));
+}
+
+/** One guessed origin: its shop search, plus the brand check for weak guesses. */
+async function askGuess(job, ctx) {
+  const hits = await searchStore(job.origin, job.guess.remainder, ctx);
+  if (!hits.length || job.guess.basis !== "suffix") return hits;
+  return (await shopIsBrand(job.origin, job.guess.name, ctx)) ? hits : [];
+}
+
+/**
+ * The free source: guess the brand's shop, ask its own search engine — with the
+ * brand words STRIPPED, since they name the domain, not the product.
+ *
+ * Every guess is asked AT ONCE, and the most confident one that answers wins.
+ * One at a time, a brand at the end of the sentence was reached only after the
+ * opening-word guesses had failed: "Saria silk midi Nol Collective" took 12.3
+ * seconds against a 12-second budget. All at once and simply awaited, the slowest
+ * dead domain decides instead — 6.1 seconds for a query the sequential version
+ * answered in 375 ms. So everything starts together, and the search finishes the
+ * moment nothing MORE confident than the best answer is still running. A more
+ * confident guess still in flight gets a grace period, not a veto: a hanging
+ * domain must not hold a real answer hostage. Measured in that shape, the two
+ * cases above took well under a second and 2.2 seconds.
+ */
+export async function storeSearchSource(query, ctx = {}) {
+  const jobs = guessesWithRemainder(query).flatMap((guess, gi) =>
+    guess.origins.map((origin, oi) => ({ guess, origin, rank: gi * 10 + oi, done: false, hits: [] })));
+  if (!jobs.length) return [];
+
+  const best = () => jobs.reduce((b, j) => (j.hits.length && (!b || j.rank < b.rank) ? j : b), null);
+
+  return new Promise((resolve) => {
+    let over = false;
+    let grace = null;
+    let budget = null;
+    const finish = () => {
+      if (over) return;
+      over = true;
+      clearTimeout(budget);
+      clearTimeout(grace);
+      resolve(best()?.hits ?? []);
+    };
+    const settle = () => {
+      if (over) return;
+      const top = best();
+      if (!top) {
+        if (jobs.every((j) => j.done)) finish();
+        return;
+      }
+      if (jobs.every((j) => j.done || j.rank > top.rank)) {
+        finish();
+        return;
+      }
+      if (!grace) grace = setTimeout(finish, ctx.guessGraceMs ?? GUESS_GRACE_MS);
+    };
+    budget = setTimeout(finish, ctx.guessBudgetMs ?? GUESS_BUDGET_MS);
+    for (const job of jobs) {
+      askGuess(job, ctx)
+        .then((hits) => { job.hits = hits; }, () => {})
+        .finally(() => { job.done = true; settle(); });
+    }
+  });
 }
 
 /**
