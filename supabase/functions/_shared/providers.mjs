@@ -145,3 +145,42 @@ export function providerSummary({ includeHidden = false } = {}) {
       id, label: p.label, signup: p.signup, freeNote: p.freeNote, verified: p.verified,
     }));
 }
+
+/**
+ * Step-by-step for someone who has never set up a key — the first thing anyone
+ * whose items are held or blocked needs, and until now only reachable as a
+ * vendor list (/providers) with no instructions.
+ *
+ * Scrape.do is the one recommended: its free credits renew monthly and it is
+ * tested end to end. The command NAMES the provider on purpose — a Scrape.do key
+ * has the same shape as a ScraperAPI one, so a bare "/setkey <key>" is answered
+ * with "I can't tell which service that key is for", which is a terrible first
+ * experience for the exact person this guide is for.
+ *
+ * @param {{ heldCount?: number }} [opts]  items currently waiting on a key
+ */
+export function keySetupGuide({ heldCount = 0 } = {}) {
+  const p = PROVIDERS.scrapedo;
+  return [
+    "🔑 Setting up an unblocker key (about 2 minutes, free)",
+    "",
+    "Some shops refuse my server, either because they block bots or because they're",
+    "rate-limiting the shared address I run on. An unblocker key lets me fetch through",
+    "a service that gets through. It's your own account, so you control what it spends.",
+    "",
+    `1. Sign up at ${p.signup}. The free plan is enough.`,
+    "2. Your API token is created automatically. Copy it from your Scrape.do dashboard.",
+    "3. Send it to me here, with the word scrapedo in front:",
+    "     /setkey scrapedo YOUR_TOKEN",
+    "   I delete that message as soon as I've read it, and store the key encrypted.",
+    "",
+    "The free plan gives 1,000 credits a month and renews. Most checks cost 1 credit,",
+    "a few heavily protected shops cost more. I tell you the cost before you add one,",
+    "and warn you when the balance is running low.",
+    ...(heldCount > 0
+      ? ["", `As soon as the key is in, I'll retry your ${heldCount} held item${heldCount === 1 ? "" : "s"} straight away.`]
+      : []),
+    "",
+    "Other services work too: /providers lists them.",
+  ].join("\n");
+}

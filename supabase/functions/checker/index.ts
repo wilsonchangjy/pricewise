@@ -606,7 +606,12 @@ async function recordFailure(product, message, kind = "error", subs = null) {
       : neverWorked && failures === 1
       ? `⚠️ I couldn't read ${product.title} on the first try.\n${message}\nThat's the baseline I promised you — I'll keep retrying, and tell you if it starts working or if I give up.\n${product.url}`
       : `⚠️ I'm having trouble reading ${product.title}\n${message}\nI'll keep trying, less often. If it never recovers I'll tell you.\n${product.url}`;
-    for (const w of watchers) await sendMessage(BOT_TOKEN, w.users.telegram_chat_id, text);
+    // A throttled item is waiting on exactly one thing a user can do, so the
+    // notice carries the way to do it.
+    const keyboard = throttled
+      ? { inline_keyboard: [[{ text: "🔑 How do I get a key?", callback_data: "kh" }]] }
+      : undefined;
+    for (const w of watchers) await sendMessage(BOT_TOKEN, w.users.telegram_chat_id, text, { keyboard });
   }
 
   await db.from("product_readings").insert({

@@ -131,10 +131,9 @@ export function parseCommand(text) {
     }
     case "/setkey": {
       // Secret — tell the webhook to delete the user's message from the chat.
-      if (!arg) {
-        return { cmd: "setkey", redactMessage: false,
-                 message: "Usage: /setkey <key>  — or /setkey <provider> <key>. See /providers for the options." };
-      }
+      // Bare /setkey is someone asking HOW, usually a first-timer whose items
+      // are held. A one-line usage hint assumed they already had a key.
+      if (!arg) return { cmd: "keyhelp" };
       // "/setkey scraperapi abc123" names the vendor; "/setkey abc123" is inferred.
       const parts = arg.split(/\s+/);
       if (parts.length > 1) {

@@ -20,7 +20,7 @@ import { formatHistory } from "../_shared/history.mjs";
 import { fmt } from "../_shared/alerting.mjs";
 import { CATEGORIES, detectCategory, normalizeCategory } from "../_shared/category.mjs";
 import { matchVariant } from "../_shared/variants.mjs";
-import { PROVIDERS, DEFAULT_PROVIDER, normalizeProvider, detectProvider, providerSummary } from "../_shared/providers.mjs";
+import { PROVIDERS, DEFAULT_PROVIDER, normalizeProvider, detectProvider, providerSummary, keySetupGuide } from "../_shared/providers.mjs";
 import { storesMessage } from "../_shared/stores.mjs";
 import {
   parseCallback, listKeyboard, itemKeyboard, sizeKeyboard, everyKeyboard,
@@ -189,6 +189,7 @@ async function handle(msg, chatId, fromId) {
     case "setsize": return setDefaultSize(user, chatId, intent.category, intent.value);
     case "setevery":return setDefaultEvery(user, chatId, intent.value);
     case "setkey":  return setKey(user, chatId, intent.key, intent.providerWord);
+    case "keyhelp": return showKeyGuide(user, chatId);
     case "setaikey":return intent.clear ? forgetAiKey(user, chatId) : setAiKey(user, chatId, intent.key);
     case "find":    return findItems(user, chatId, intent.query);
     case "providers": return showProviders(chatId);
@@ -496,14 +497,43 @@ async function setKey(user, chatId, key, providerWord) {
   });
   if (error) throw error;
 
+  // Anything that was held waiting on a key shouldn't sit out its retry timer —
+  // the person just did the thing we asked them to. The next checker tick
+  // (within 5 minutes) picks these up.
+  const held = await heldProductIds(user);
+  if (held.length) {
+    await db.from("tracked_products").update({ next_check_at: new Date().toISOString() }).in("id", held);
+  }
+
   return reply(chatId, [
     `🔐 ${p.label} key saved (encrypted) and your message deleted.`,
+    held.length ? `Retrying your ${held.length} held item${held.length === 1 ? "" : "s"} now — you'll hear from me within a few minutes.` : "",
     `You can now track bot-protected stores — up to ${MAX_DEFENDED} of them.`,
     "How often I check each one depends on what it costs: the cheap ones every 6h,",
     "the priciest once a day. I'll tell you the cost before you add anything.",
     p.verified ? "" : `Heads up: I haven't been able to test ${p.label} end to end yet, so tell me if a check fails and I'll dig in.`,
     "Paste one of those links to try it.",
   ].filter(Boolean).join("\n"));
+}
+
+/** This user's items that are waiting on something — failing, but not given up on. */
+async function heldProductIds(user) {
+  const { data } = await db.from("subscriptions")
+    .select("tracked_products!inner(id, status, consecutive_failures)")
+    .eq("user_id", user.id).eq("status", "active");
+  return (data ?? [])
+    .map((r) => r.tracked_products)
+    .filter((p) => p && p.status !== "dead" && (p.consecutive_failures ?? 0) > 0)
+    .map((p) => p.id);
+}
+
+/** The step-by-step, for /setkey on its own and the button on an on-hold notice. */
+async function showKeyGuide(user, chatId) {
+  const { data: has } = await db.from("user_api_keys").select("provider").eq("user_id", user.id).maybeSingle();
+  const guide = keySetupGuide({ heldCount: (await heldProductIds(user)).length });
+  return reply(chatId, has
+    ? `You already have a ${PROVIDERS[has.provider]?.label ?? "unblocker"} key set. To replace it, follow the same steps:\n\n${guide}`
+    : guide);
 }
 
 async function showProviders(chatId) {
@@ -1236,6 +1266,8 @@ async function handleCallback(cq) {
     // "Track the relist", offered when an eBay listing sold. The id is
     // user-supplied bytes like any callback — digits only — and it then goes
     // through addItem's full checks, exactly as if the link had been pasted.
+    // "🔑 How do I get a key?" on an on-hold notice. No subscription involved.
+    case "kh": await answerCallback(BOT_TOKEN, cq.id); return showKeyGuide(user, chatId);
     case "rl": return trackRelist(user, chatId, messageId, cq.id, arg, cq.message?.text ?? "");
   }
 
