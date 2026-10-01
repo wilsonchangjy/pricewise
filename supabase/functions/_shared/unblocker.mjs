@@ -149,3 +149,47 @@ async function providerFetch(provider, url, apiKey, country, tierParams) {
     return { ok: false, status: 0, body: "", ms: Date.now() - started, mode: "", error: String(e?.message ?? e) };
   }
 }
+
+/**
+ * A fetch() that, on HTTP 429 ONLY, retries through the user's unblocker.
+ *
+ * WHY THIS EXISTS. From 2026-09-29, Shopify's edge answered every request from
+ * Supabase's outbound address with `429 local_rate_limited` (Retry-After: 60)
+ * — product .js, .json and the plain HTML page alike, on every Shopify shop we
+ * track — while the same requests from an ordinary connection got 200 at the
+ * same minute. That address is shared by many Supabase projects, so other
+ * people's traffic spends the allowance, and nothing we do about our own
+ * request rate (a handful a day) changes it. It took out three things at once:
+ * the checker (all five Shopify items), /add (the router identifies Shopify by
+ * fetching .js, so a 429 read as "unsupported site"), and the free search.
+ *
+ * So: direct first, always — it's free, and the throttle may lift. Only a 429
+ * is retried, through the unblocker's 1-credit plain tier, which answered 200
+ * for all three affected shops (measured 2026-10-01). A 404, a dead domain or a
+ * timeout is NOT retried: those are answers, and paying to ask again would only
+ * spend the user's credits on a no.
+ *
+ * `getKey` is called lazily — most calls never need it — and its result is
+ * remembered for the life of this wrapper.
+ *
+ * @param {typeof fetch} baseFetch
+ * @param {() => Promise<{apiKey:string, provider?:string, country?:string}|null>} getKey
+ */
+export function withRateLimitFallback(baseFetch, getKey) {
+  let keyPromise;
+  const key = () => (keyPromise ??= Promise.resolve().then(getKey).catch(() => null));
+  return async (url, init = {}) => {
+    const res = await baseFetch(url, init);
+    if (res?.status !== 429) return res;
+    const k = await key();
+    if (!k?.apiKey) return res;
+    const via = await fetchApiViaUnblocker(String(url), { apiKey: k.apiKey, provider: k.provider, country: k.country ?? "sg" });
+    if (!via.ok) return res; // report the original 429, not the unblocker's failure
+    const body = via.body ?? "";
+    return {
+      ok: true, status: via.status, url: String(url), headers: new Headers(),
+      text: async () => body, json: async () => JSON.parse(body),
+      viaUnblocker: true, cost: via.cost, remaining: via.remaining,
+    };
+  };
+}

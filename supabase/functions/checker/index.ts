@@ -131,7 +131,25 @@ async function checkProduct(product) {
     }
   }
 
-  const reading = await selectAdapter(product.adapter)(item, { unblockerKey, unblockerProvider, startTier });
+  // A DIRECT product can still need a key: when a shop throttles our server's
+  // address (Shopify, from 2026-09-29), the adapter detours through a watcher's
+  // unblocker. Looked up only if asked for, and never below the credit floor —
+  // a detour must not be what empties someone's wallet.
+  let fallbackFunder;
+  const getUnblocker = async () => {
+    if (unblockerKey) return { apiKey: unblockerKey, provider: unblockerProvider };
+    const { data } = await db.rpc("get_unblocker_for_product", { p_product_id: product.id });
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row?.api_key) return null;
+    const { data: k } = await db.from("user_api_keys")
+      .select("credits_remaining").eq("user_id", row.user_id).maybeSingle();
+    if (k?.credits_remaining != null && k.credits_remaining < MIN_CREDITS_TO_FETCH) return null;
+    fallbackFunder = row.user_id;
+    return { apiKey: row.api_key, provider: row.provider };
+  };
+
+  const reading = await selectAdapter(product.adapter)(item, { unblockerKey, unblockerProvider, startTier, getUnblocker });
+  if (reading.via === "unblocker" && !funderId) funderId = fallbackFunder;
 
   if (!reading.ok) {
     // Some failures will never resolve — an eBay auction is not going to become
@@ -213,7 +231,14 @@ async function checkProduct(product) {
   const betterTitle = reading.title && slugFallback ? reading.title.slice(0, 120) : undefined;
 
   const learnedInterval = reading.tier ? TIER_INTERVAL_MIN[reading.tier] : undefined;
-  const effectiveInterval = learnedInterval ?? product.check_interval_minutes;
+  // A detoured read costs a credit, so it runs at the plain-tier cadence (6h) —
+  // about 120 credits a month per item rather than 240 at 3h. Only the NEXT
+  // check is spaced out; check_interval_minutes is left alone, so the moment
+  // direct works again the item returns to the cadence its watcher chose.
+  const effectiveInterval = learnedInterval
+    ?? (reading.via === "unblocker"
+      ? Math.max(product.check_interval_minutes, TIER_INTERVAL_MIN.plain)
+      : product.check_interval_minutes);
 
   await db.from("tracked_products").update({
     last_ok_at: new Date().toISOString(),
@@ -546,7 +571,12 @@ async function recordFailure(product, message, kind = "error", subs = null) {
   const failures = (product.consecutive_failures ?? 0) + 1;
   // Never-baselined items retry soon instead of backing off — a first reading is
   // something the user is actively waiting for. See nextCheckDelayMinutes.
-  const backoff = nextCheckDelayMinutes(product.check_interval_minutes, failures, !!product.last_ok_at);
+  // A throttled shop is retried at the item's normal pace, not backed off: a
+  // direct retry is free, and backing off to 48h meant an item would sit dark
+  // for up to two days after the throttle had already lifted.
+  const backoff = kind === "rate_limited"
+    ? product.check_interval_minutes
+    : nextCheckDelayMinutes(product.check_interval_minutes, failures, !!product.last_ok_at);
   console.warn(`product ${product.id} (${product.adapter}) failed x${failures}: ${message}`);
 
   // Silence is the one thing a watcher must never do.
@@ -558,12 +588,20 @@ async function recordFailure(product, message, kind = "error", subs = null) {
   // FIRST failure on a never-baselined item is announced immediately; after
   // that, the usual two messages (backing off, and giving up).
   const neverWorked = !product.last_ok_at;
-  const speak = (neverWorked && failures === 1) || failures === NOTIFY_AFTER || failures === MAX_FAILURES;
+  // RATE LIMITED is not BROKEN. The shop is fine and so is the item; the shop
+  // is throttling the address we fetch from. So: say so once, plainly, and never
+  // "give up" over it — parking a healthy item as dead because of other people's
+  // traffic on a shared address would be the bot quitting on the user.
+  const throttled = kind === "rate_limited";
+  const givesUp = !throttled && failures >= MAX_FAILURES;
+  const speak = (neverWorked && failures === 1) || failures === NOTIFY_AFTER || (!throttled && failures === MAX_FAILURES);
 
   if (speak) {
     const watchers = subs ?? (await db.from("subscriptions")
       .select("*, users(telegram_chat_id)").eq("product_id", product.id).eq("status", "active")).data ?? [];
-    const text = failures >= MAX_FAILURES
+    const text = throttled
+      ? `⏳ ${product.title} is on hold\n${product.adapter === "shopify" ? "Shopify" : "The shop"} is rate-limiting my server — a shared address, nothing to do with this item, and the page itself is fine.\nI'll keep trying and pick it up as soon as it lets me through. Adding an unblocker key with /setkey lets me route around it for 1 credit a check.\n${product.url}`
+      : failures >= MAX_FAILURES
       ? `❌ I've given up on ${product.title}\nIt failed ${failures} checks in a row (${message}).\nIt's off your check list — send the link again if you think it's fixed.\n${product.url}`
       : neverWorked && failures === 1
       ? `⚠️ I couldn't read ${product.title} on the first try.\n${message}\nThat's the baseline I promised you — I'll keep retrying, and tell you if it starts working or if I give up.\n${product.url}`
@@ -573,12 +611,12 @@ async function recordFailure(product, message, kind = "error", subs = null) {
 
   await db.from("product_readings").insert({
     product_id: product.id,
-    raw_status: kind === "blocked" ? "blocked" : kind === "soft" ? "soft" : "error",
+    raw_status: kind === "blocked" || kind === "rate_limited" ? "blocked" : kind === "soft" ? "soft" : "error",
   });
   await db.from("tracked_products").update({
     unblocker_tier: null, // it stopped working; re-explore from plain next time
     consecutive_failures: failures,
-    status: failures >= MAX_FAILURES ? "dead" : failures >= 3 ? "backing_off" : "active",
+    status: givesUp ? "dead" : failures >= 3 ? "backing_off" : "active",
     next_check_at: minutesFromNow(backoff),
   }).eq("id", product.id);
 }

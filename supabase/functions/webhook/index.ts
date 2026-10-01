@@ -9,6 +9,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { parseCommand } from "../_shared/commands.mjs";
 import { planAdd, MAX_DEFENDED, MAX_ITEMS, INTERVAL_OPTIONS, MIN_INTERVAL_MIN, FREE_INTERVAL_MIN, DEFENDED_INTERVAL_MIN, ADAPTER_TIER, TIER_INTERVAL_MIN, monthlyCredits } from "../_shared/policy.mjs";
 import { detectAdapter } from "../_shared/router.mjs";
+import { withRateLimitFallback } from "../_shared/unblocker.mjs";
 import { sendMessage, deleteMessage, editMessage, answerCallback } from "../_shared/telegram.mjs";
 import { labelFromUrl, displayTitle } from "../_shared/label.mjs";
 import { localeFromUrl, currencyForCountry, MARKET_CHOICES, isKnownCountry, knownCountries } from "../_shared/locale.mjs";
@@ -216,6 +217,22 @@ async function upsertUser(telegramUserId, chatId) {
 }
 
 // ── /add ─────────────────────────────────────────────────────────────────────
+/**
+ * This user's own unblocker key, for detouring around a shop that throttles our
+ * server's address (Shopify answers 429 to Supabase from 2026-09-29). Fetched
+ * only when a 429 actually happens; null if they have no key.
+ */
+function userUnblocker(user) {
+  return async () => {
+    const [{ data: apiKey }, { data: row }] = await Promise.all([
+      db.rpc("get_user_api_key", { p_user_id: user.id }),
+      db.from("user_api_keys").select("provider, credits_remaining").eq("user_id", user.id).maybeSingle(),
+    ]);
+    if (!apiKey || (row?.credits_remaining != null && row.credits_remaining < 15)) return null;
+    return { apiKey, provider: row?.provider ?? undefined };
+  };
+}
+
 async function addItem(user, chatId, rawUrl) {
   // Strangers choose what we fetch, so the link is checked BEFORE any request:
   // public http(s) only, and campaign junk stripped so shared items dedupe.
@@ -246,8 +263,12 @@ async function addItem(user, chatId, rawUrl) {
   const { data: defendedCount } = await db.rpc("count_defended_subscriptions", { p_user_id: user.id });
   const { data: keyRow } = await db.from("user_api_keys").select("user_id").eq("user_id", user.id).maybeSingle();
 
+  // The router recognises Shopify by fetching /products/x.js. While Shopify
+  // throttles our address that answers 429, and every Shopify link read as an
+  // "unsupported site" — so the probe gets the same 429 detour as the checker.
+  const fallbackFetch = withRateLimitFallback(fetch, userUnblocker(user));
   const plan = await planAdd(url, {
-    detectAdapter,
+    detectAdapter: (u) => detectAdapter(u, { fetchImpl: fallbackFetch }),
     userHasKey: Boolean(keyRow),
     userDefendedCount: Number(defendedCount ?? 0),
   });
@@ -716,8 +737,13 @@ async function runSearch(user, chatId, query, token) {
   ]);
   const ai = Array.isArray(aiRows) ? aiRows[0] : aiRows;
 
+  const getUnblocker = userUnblocker(user);
   const found = await findProduct(query, {
     ai: ai?.api_key ? { apiKey: ai.api_key, provider: ai.provider } : undefined,
+    // Shop searches, adapter probes and Shopify reads all hit the same 429 while
+    // Shopify throttles our address; with a key, each detours for 1 credit.
+    fetchImpl: withRateLimitFallback(fetch, getUnblocker),
+    getUnblocker,
     userHasUnblockerKey: Boolean(keyRow),
     country,
     max: MAX_CANDIDATES,

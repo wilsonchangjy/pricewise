@@ -4,6 +4,7 @@
 // parseShopifyJs() is pure (no network) so it can be unit-tested with fixtures.
 
 import { httpGet } from "../fetcher.mjs";
+import { fetchApiViaUnblocker } from "../unblocker.mjs";
 import { currencyForCountry } from "../locale.mjs";
 
 const cents = (n) => (n == null ? undefined : Number(n) / 100);
@@ -43,7 +44,7 @@ export function parseShopifyJs(data, item) {
 }
 
 /** @param {import("../types.mjs").Item} item */
-export async function readShopify(item) {
+export async function readShopify(item, ctx = {}) {
   const checkedAt = new Date().toISOString();
   // Build the canonical /products/{handle}.js (handles /collections/.../products/ URLs).
   const u = new URL(item.url);
@@ -58,7 +59,26 @@ export async function readShopify(item) {
   const market = item.market ? String(item.market).toUpperCase() : undefined;
   const jsUrl = market ? `${base}?country=${encodeURIComponent(market)}` : base;
 
-  const r = await httpGet(jsUrl, { headers: { accept: "application/json" } });
+  let r = await httpGet(jsUrl, { headers: { accept: "application/json" } });
+  // 429 = Shopify throttling the address we fetch from, not anything about this
+  // product (see withRateLimitFallback in unblocker.mjs). Direct stays first and
+  // free; only a 429 is retried, through a watcher's key, at 1 credit.
+  let via;
+  if (r.status === 429) {
+    const k = ctx.getUnblocker ? await ctx.getUnblocker().catch(() => null) : null;
+    if (k?.apiKey) {
+      const u2 = await fetchApiViaUnblocker(jsUrl, { apiKey: k.apiKey, provider: k.provider, country: (market ?? "sg").toLowerCase() });
+      if (u2.ok) { r = { ok: true, status: u2.status, body: u2.body }; via = u2; }
+    }
+    if (!via) {
+      return {
+        ok: false, kind: "rate_limited", status: 429, checkedAt,
+        message: k?.apiKey
+          ? "Shopify is rate-limiting my server right now, and the fallback through your unblocker didn't get through either"
+          : "Shopify is rate-limiting my server right now (a shared address, nothing to do with this item)",
+      };
+    }
+  }
   if (!r.ok) {
     const kind = r.status === 403 ? "blocked" : r.error === "timeout" ? "timeout" : "http";
     return { ok: false, kind, status: r.status, message: `shopify .js fetch failed (${r.status || r.error})`, checkedAt };
@@ -82,7 +102,12 @@ export async function readShopify(item) {
     const meta = await httpGet(`${u.origin}/meta.json`, { headers: { accept: "application/json" } });
     try { currency = JSON.parse(meta.body).currency; } catch { /* leave undefined */ }
   }
-  return parseShopifyJs(data, currency ? { ...item, currency } : item);
+  const out = parseShopifyJs(data, currency ? { ...item, currency } : item);
+  // Marked so the checker can bill the right person and slow the cadence — but
+  // NOT as a tier: a learned tier rewrites the product's interval for good, and
+  // this is a detour around someone else's traffic, not what the shop costs.
+  if (via && out.ok) { out.via = "unblocker"; out.cost = via.cost; out.remaining = via.remaining; }
+  return out;
 }
 
 /**
